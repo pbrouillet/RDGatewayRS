@@ -129,6 +129,13 @@ impl DbProvider for SqliteProvider {
         })
     }
 
+    async fn list_groups(&self) -> Result<Vec<Group>, DbError> {
+        let groups = sqlx::query_as::<_, Group>("SELECT id, name FROM groups")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(groups)
+    }
+
     async fn add_user_to_group(&self, user_id: i64, group_id: i64) -> Result<(), DbError> {
         sqlx::query("INSERT OR IGNORE INTO user_groups (user_id, group_id) VALUES (?, ?)")
             .bind(user_id)
@@ -163,6 +170,14 @@ impl DbProvider for SqliteProvider {
         let mut new_rule = rule.clone();
         new_rule.id = result.last_insert_rowid();
         Ok(new_rule)
+    }
+
+    async fn delete_acl_rule(&self, rule_id: i64) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM acl_rules WHERE id = ?")
+            .bind(rule_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     async fn create_session(&self, session: &Session) -> Result<(), DbError> {

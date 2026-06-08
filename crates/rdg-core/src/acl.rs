@@ -434,6 +434,10 @@ mod tests {
             unimplemented!()
         }
 
+        async fn list_groups(&self) -> Result<Vec<Group>, DbError> {
+            unimplemented!()
+        }
+
         async fn add_user_to_group(&self, _user_id: i64, _group_id: i64) -> Result<(), DbError> {
             unimplemented!()
         }
@@ -443,6 +447,10 @@ mod tests {
         }
 
         async fn create_acl_rule(&self, _rule: &AclRule) -> Result<AclRule, DbError> {
+            unimplemented!()
+        }
+
+        async fn delete_acl_rule(&self, _rule_id: i64) -> Result<(), DbError> {
             unimplemented!()
         }
 

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/rdg-proto", "crates/rdg-core", "crates/rdg-server"]
+members = ["crates/rdg-proto", "crates/rdg-core", "crates/rdg-server", "crates/rdg-tui"]
 resolver = "2"
 
 [workspace.package]

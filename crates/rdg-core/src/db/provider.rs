@@ -26,11 +26,13 @@ pub trait DbProvider: Send + Sync {
     // --- Groups ---
     async fn get_user_groups(&self, user_id: i64) -> Result<Vec<Group>, DbError>;
     async fn create_group(&self, name: &str) -> Result<Group, DbError>;
+    async fn list_groups(&self) -> Result<Vec<Group>, DbError>;
     async fn add_user_to_group(&self, user_id: i64, group_id: i64) -> Result<(), DbError>;
 
     // --- ACL ---
     async fn get_acl_rules(&self) -> Result<Vec<AclRule>, DbError>;
     async fn create_acl_rule(&self, rule: &AclRule) -> Result<AclRule, DbError>;
+    async fn delete_acl_rule(&self, rule_id: i64) -> Result<(), DbError>;
 
     // --- Sessions ---
     async fn create_session(&self, session: &Session) -> Result<(), DbError>;

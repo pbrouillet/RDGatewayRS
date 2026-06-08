@@ -1,0 +1,53 @@
+[workspace]
+members = ["crates/rdg-proto", "crates/rdg-core", "crates/rdg-server"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web framework
+axum = { version = "0.8", features = ["ws"] }
+axum-extra = { version = "0.10" }
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+
+# TLS
+rustls = { version = "0.23" }
+rustls-pemfile = "2"
+rcgen = "0.13"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Crypto (NTLM)
+md4 = "0.10"
+md-5 = "0.10"
+hmac = "0.12"
+rand = "0.8"
+digest = "0.10"
+base64 = "0.22"
+
+# Kerberos (cross-platform)
+cross-krb5 = "0.5"
+
+# Utilities
+bytes = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+anyhow = "1"
+
+# Internal crates
+rdg-proto = { path = "crates/rdg-proto" }
+rdg-core = { path = "crates/rdg-core" }

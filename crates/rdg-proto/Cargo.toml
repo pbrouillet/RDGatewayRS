@@ -1,0 +1,19 @@
+[package]
+name = "rdg-proto"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bytes = { workspace = true }
+thiserror = { workspace = true }
+md4 = { workspace = true }
+md-5 = { workspace = true }
+hmac = { workspace = true }
+rand = { workspace = true }
+digest = { workspace = true }
+base64 = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+hex = "0.4"

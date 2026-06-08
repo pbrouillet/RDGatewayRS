@@ -1,0 +1,14 @@
+listen_addr = "0.0.0.0"
+listen_port = 4443
+server_name = "WIN-8QEC20TIHO4"
+
+[tls]
+auto_generate = true
+
+[database]
+url = "sqlite://C:/src/rdg-gateway/rdg-gateway.db?mode=rwc"
+
+[auth]
+# spn = "HTTP/gateway.domain.com"    # Auto-derived from server_name if not set
+# keytab_path = "/etc/rdg-gateway/krb5.keytab"  # Linux/macOS only
+open_mode = true  # Accept any NTLM without validation (testing only!)

@@ -11,7 +11,7 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::ui;
+use crate::tui::ui;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveTab {

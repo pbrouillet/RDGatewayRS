@@ -1,9 +1,11 @@
 mod handlers;
 mod relay;
 mod state;
+mod tui;
 
 use anyhow::Result;
 use axum::Router;
+use clap::{Parser, Subcommand};
 use rdg_core::config::ServerConfig;
 use rdg_core::db::{DbProvider, SqliteProvider};
 use state::AppState;
@@ -11,11 +13,47 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Once};
 use tracing_subscriber::EnvFilter;
 
+#[derive(Parser)]
+#[command(name = "rdg-server", about = "Lightweight RD Gateway server")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Run the RD Gateway server (default)
+    Serve {
+        /// Path to configuration file
+        #[arg(short, long, default_value = "rdg-gateway.toml")]
+        config: String,
+    },
+    /// Launch the TUI for database management
+    Manage {
+        /// Path to configuration file
+        #[arg(short, long, default_value = "rdg-gateway.toml")]
+        config: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    match cli.command.unwrap_or(Command::Serve {
+        config: std::env::var("RDG_CONFIG").unwrap_or_else(|_| "rdg-gateway.toml".to_string()),
+    }) {
+        Command::Serve { config } => run_serve(&config).await,
+        Command::Manage { config } => {
+            let cfg = load_config(&config)?;
+            tui::run_manage(cfg).await
+        }
+    }
+}
+
+async fn run_serve(config_path: &str) -> Result<()> {
     install_crypto_provider();
 
-    // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()
@@ -23,30 +61,24 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    // Load config (from file or defaults)
-    let config = load_config()?;
+    let config = load_config(config_path)?;
     tracing::info!(
         "Starting RDG Gateway on {}:{}",
         config.listen_addr,
         config.listen_port
     );
 
-    // Initialize database
     let db = SqliteProvider::new(&config.database.url).await?;
     db.migrate().await?;
     tracing::info!("Database initialized");
 
-    // Build app state
     let app_state = Arc::new(AppState::new(config.clone(), Arc::new(db)));
 
-    // Build router
     let app = Router::new()
         .merge(handlers::routes())
         .with_state(app_state.clone());
 
-    // TLS configuration
     let addr = SocketAddr::new(config.listen_addr.parse()?, config.listen_port);
-
     let tls_config = build_tls_config(&config).await?;
 
     tracing::info!("Listening on https://{}", addr);
@@ -65,12 +97,9 @@ fn install_crypto_provider() {
     });
 }
 
-fn load_config() -> Result<ServerConfig> {
-    // Try loading from config file, fall back to defaults
-    let config_path =
-        std::env::var("RDG_CONFIG").unwrap_or_else(|_| "rdg-gateway.toml".to_string());
-    if std::path::Path::new(&config_path).exists() {
-        let content = std::fs::read_to_string(&config_path)?;
+fn load_config(config_path: &str) -> Result<ServerConfig> {
+    if std::path::Path::new(config_path).exists() {
+        let content = std::fs::read_to_string(config_path)?;
         let config: ServerConfig = toml::from_str(&content)?;
         Ok(config)
     } else {

@@ -28,13 +28,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --bin rdg-server --bin rdg-tui
+      - run: cargo build --release --bin rdg-server
       - name: Package
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path dist -Force
           Copy-Item target/release/rdg-server.exe dist/
-          Copy-Item target/release/rdg-tui.exe dist/
           Copy-Item rdg-gateway.toml dist/
           Compress-Archive -Path dist/* -DestinationPath rdg-gateway-windows-x86_64.zip
       - uses: actions/upload-artifact@v4
@@ -49,13 +48,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --bin rdg-server --bin rdg-tui
+      - run: cargo build --release --bin rdg-server
       - name: Package
         run: |
           mkdir -p dist
           cp target/release/rdg-server dist/
-          cp target/release/rdg-tui dist/
-          strip dist/rdg-server dist/rdg-tui
+          strip dist/rdg-server
           cp rdg-gateway.toml dist/
           cd dist && tar czf ../rdg-gateway-linux-x86_64.tar.gz *
       - uses: actions/upload-artifact@v4

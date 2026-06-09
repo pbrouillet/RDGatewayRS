@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/rdg-proto", "crates/rdg-core", "crates/rdg-server", "crates/rdg-tui"]
+members = ["crates/rdg-proto", "crates/rdg-core", "crates/rdg-server"]
 resolver = "2"
 
 [workspace.package]
@@ -47,6 +47,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 anyhow = "1"
+clap = { version = "4", features = ["derive"] }
 
 # Internal crates
 rdg-proto = { path = "crates/rdg-proto" }

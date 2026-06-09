@@ -1,5 +1,5 @@
-use crate::app::{App, InputMode};
-use crate::ui::centered_rect;
+use crate::tui::app::{App, InputMode};
+use crate::tui::ui::centered_rect;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};

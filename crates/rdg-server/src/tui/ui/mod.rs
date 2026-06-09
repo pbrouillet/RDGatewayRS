@@ -5,7 +5,7 @@ pub mod sessions;
 pub mod tabs;
 pub mod users;
 
-use crate::app::{ActiveTab, App, InputMode};
+use crate::tui::app::{ActiveTab, App, InputMode};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};

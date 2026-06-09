@@ -1,4 +1,4 @@
-use crate::db::models::{AclRule, Group, Session, User};
+use crate::db::models::{AclRule, CertificateInfo, Group, Session, User};
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -38,6 +38,10 @@ pub trait DbProvider: Send + Sync {
     async fn create_session(&self, session: &Session) -> Result<(), DbError>;
     async fn end_session(&self, session_id: &str) -> Result<(), DbError>;
     async fn get_active_sessions(&self) -> Result<Vec<Session>, DbError>;
+
+    // --- Certificates ---
+    async fn get_certificate(&self) -> Result<Option<CertificateInfo>, DbError>;
+    async fn save_certificate(&self, cert: &CertificateInfo) -> Result<(), DbError>;
 }
 
 // Re-export for convenience

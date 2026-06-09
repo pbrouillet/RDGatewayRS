@@ -229,7 +229,7 @@ fn ipv6_mask(prefix_len: u8) -> u128 {
 mod tests {
     use super::*;
     use crate::db::{
-        models::{Group, Session, User},
+        models::{CertificateInfo, Group, Session, User},
         provider::DbError,
     };
 
@@ -464,6 +464,14 @@ mod tests {
 
         async fn get_active_sessions(&self) -> Result<Vec<Session>, DbError> {
             unimplemented!()
+        }
+
+        async fn get_certificate(&self) -> Result<Option<CertificateInfo>, DbError> {
+            Ok(None)
+        }
+
+        async fn save_certificate(&self, _cert: &CertificateInfo) -> Result<(), DbError> {
+            Ok(())
         }
     }
 

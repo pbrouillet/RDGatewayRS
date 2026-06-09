@@ -103,14 +103,15 @@ async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<St
     db.migrate().await?;
     tracing::info!("Database initialized");
 
-    let app_state = Arc::new(AppState::new(config.clone(), Arc::new(db)));
+    let db_arc: Arc<dyn rdg_core::db::DbProvider> = Arc::new(db);
+    let app_state = Arc::new(AppState::new(config.clone(), db_arc.clone()));
 
     let app = Router::new()
         .merge(handlers::routes())
         .with_state(app_state.clone());
 
     let addr = SocketAddr::new(config.listen_addr.parse()?, config.listen_port);
-    let tls_config = build_tls_config(&config).await?;
+    let tls_config = build_tls_config(&config, &*db_arc).await?;
 
     tracing::info!("Listening on https://{}", addr);
 
@@ -139,8 +140,10 @@ fn load_config(config_path: &str) -> Result<ServerConfig> {
     }
 }
 
-async fn build_tls_config(config: &ServerConfig) -> Result<axum_server::tls_rustls::RustlsConfig> {
+async fn build_tls_config(config: &ServerConfig, db: &dyn rdg_core::db::DbProvider) -> Result<axum_server::tls_rustls::RustlsConfig> {
     use axum_server::tls_rustls::RustlsConfig;
+    use rdg_core::db::models::CertificateInfo;
+    use sha2::{Sha256, Digest};
 
     if let (Some(cert_path), Some(key_path)) = (&config.tls.cert_path, &config.tls.key_path) {
         let tls = RustlsConfig::from_pem_file(cert_path, key_path).await?;
@@ -179,14 +182,76 @@ async fn build_tls_config(config: &ServerConfig) -> Result<axum_server::tls_rust
             }
         }
 
+        // Check if we have a persisted certificate with matching SANs
+        let cert_dir = std::path::Path::new("certs");
+        let cert_file = cert_dir.join("gateway.crt");
+        let key_file = cert_dir.join("gateway.key");
+
+        if let Ok(Some(existing)) = db.get_certificate().await {
+            let existing_sans: Vec<String> = serde_json::from_str(&existing.san_names)
+                .unwrap_or_default();
+            let mut sorted_existing = existing_sans.clone();
+            sorted_existing.sort();
+            let mut sorted_desired = san_names.clone();
+            sorted_desired.sort();
+
+            if sorted_existing == sorted_desired && cert_file.exists() && key_file.exists() {
+                tracing::info!(
+                    "Reusing persisted self-signed certificate (thumbprint: {})",
+                    &existing.thumbprint[..16]
+                );
+                let tls = RustlsConfig::from_pem_file(&cert_file, &key_file).await?;
+                return Ok(tls);
+            }
+        }
+
+        // Generate new self-signed certificate
         tracing::info!(
             "Generating self-signed TLS certificate for SANs: {:?}",
             san_names
         );
-        let cert = rcgen::generate_simple_self_signed(san_names)?;
+        let cert = rcgen::generate_simple_self_signed(san_names.clone())?;
 
         let cert_pem = cert.cert.pem();
         let key_pem = cert.key_pair.serialize_pem();
+
+        // Persist to disk
+        std::fs::create_dir_all(cert_dir)?;
+        std::fs::write(&cert_file, &cert_pem)?;
+        std::fs::write(&key_file, &key_pem)?;
+        tracing::info!("Certificate persisted to {}", cert_dir.display());
+
+        // Compute thumbprint (SHA-256 of DER)
+        let cert_der = cert.cert.der();
+        let thumbprint = {
+            let mut hasher = Sha256::new();
+            hasher.update(cert_der);
+            let hash = hasher.finalize();
+            hash.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(":")
+        };
+
+        // Parse validity dates from the certificate
+        let not_before = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+        let not_after = (chrono::Utc::now() + chrono::Duration::days(365))
+            .format("%Y-%m-%d %H:%M:%S UTC")
+            .to_string();
+
+        // Save to database
+        let cert_info = CertificateInfo {
+            id: 0,
+            thumbprint: thumbprint.clone(),
+            subject: format!("CN={}", config.server_name),
+            san_names: serde_json::to_string(&san_names)?,
+            not_before,
+            not_after,
+            cert_path: cert_file.display().to_string(),
+            key_path: key_file.display().to_string(),
+            auto_generated: true,
+            created_at: String::new(),
+        };
+        if let Err(e) = db.save_certificate(&cert_info).await {
+            tracing::warn!("Failed to save certificate to database: {}", e);
+        }
 
         let tls = RustlsConfig::from_pem(cert_pem.into_bytes(), key_pem.into_bytes()).await?;
         Ok(tls)

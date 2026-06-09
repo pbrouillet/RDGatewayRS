@@ -7,7 +7,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 use rdg_core::config::ServerConfig;
 use rdg_core::db::DbProvider;
-use rdg_core::db::models::{AclRule, Group, Session, User};
+use rdg_core::db::models::{AclRule, CertificateInfo, Group, Session, User};
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -150,6 +150,9 @@ pub struct App {
     pub session_index: usize,
     pub tls_san_index: usize,
 
+    // Certificate metadata from DB
+    pub cert_info: Option<CertificateInfo>,
+
     // Group membership cache: user_id -> Vec<Group>
     pub user_groups: std::collections::HashMap<i64, Vec<Group>>,
 }
@@ -174,6 +177,7 @@ impl App {
             acl_index: 0,
             session_index: 0,
             tls_san_index: 0,
+            cert_info: None,
             user_groups: std::collections::HashMap::new(),
         }
     }
@@ -183,6 +187,7 @@ impl App {
         self.groups = self.db.list_groups().await?;
         self.acl_rules = self.db.get_acl_rules().await?;
         self.sessions = self.db.get_active_sessions().await?;
+        self.cert_info = self.db.get_certificate().await.unwrap_or(None);
 
         // Load group memberships for each user
         self.user_groups.clear();

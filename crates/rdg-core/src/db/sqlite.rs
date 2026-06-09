@@ -1,4 +1,4 @@
-use super::models::{AclRule, Group, Session, User};
+use super::models::{AclRule, CertificateInfo, Group, Session, User};
 use super::provider::{DbError, DbProvider};
 use async_trait::async_trait;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
@@ -59,6 +59,18 @@ impl DbProvider for SqliteProvider {
                 target_port INTEGER,
                 connected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 disconnected_at TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS certificates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                thumbprint TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                san_names TEXT NOT NULL,
+                not_before TEXT NOT NULL,
+                not_after TEXT NOT NULL,
+                cert_path TEXT NOT NULL,
+                key_path TEXT NOT NULL,
+                auto_generated BOOLEAN NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );",
         )
         .execute(&self.pool)
@@ -209,5 +221,31 @@ impl DbProvider for SqliteProvider {
         .fetch_all(&self.pool)
         .await?;
         Ok(sessions)
+    }
+
+    async fn get_certificate(&self) -> Result<Option<CertificateInfo>, DbError> {
+        let cert = sqlx::query_as::<_, CertificateInfo>(
+            "SELECT id, thumbprint, subject, san_names, not_before, not_after, cert_path, key_path, auto_generated, created_at FROM certificates ORDER BY id DESC LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(cert)
+    }
+
+    async fn save_certificate(&self, cert: &CertificateInfo) -> Result<(), DbError> {
+        sqlx::query(
+            "INSERT INTO certificates (thumbprint, subject, san_names, not_before, not_after, cert_path, key_path, auto_generated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&cert.thumbprint)
+        .bind(&cert.subject)
+        .bind(&cert.san_names)
+        .bind(&cert.not_before)
+        .bind(&cert.not_after)
+        .bind(&cert.cert_path)
+        .bind(&cert.key_path)
+        .bind(cert.auto_generated)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }

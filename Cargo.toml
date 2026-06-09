@@ -35,7 +35,11 @@ md-5 = "0.10"
 hmac = "0.12"
 rand = "0.8"
 digest = "0.10"
+sha2 = "0.10"
 base64 = "0.22"
+
+# Time
+chrono = "0.4"
 
 # Kerberos (cross-platform)
 cross-krb5 = "0.5"

@@ -9,7 +9,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5), // TLS mode & cert paths
+            Constraint::Length(9), // TLS mode & cert info
             Constraint::Min(5),   // SAN list
         ])
         .split(area);
@@ -43,20 +43,45 @@ fn draw_tls_info(f: &mut Frame, app: &App, area: Rect) {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "—".to_string());
 
-    let text = vec![
+    let mut text = vec![
         Line::from(vec![
-            Span::styled("Mode: ", Style::default().fg(Color::Yellow)),
+            Span::styled("Mode:    ", Style::default().fg(Color::Yellow)),
             Span::raw(mode),
         ]),
         Line::from(vec![
-            Span::styled("Cert: ", Style::default().fg(Color::Yellow)),
+            Span::styled("Cert:    ", Style::default().fg(Color::Yellow)),
             Span::raw(cert_path),
         ]),
         Line::from(vec![
-            Span::styled("Key:  ", Style::default().fg(Color::Yellow)),
+            Span::styled("Key:     ", Style::default().fg(Color::Yellow)),
             Span::raw(key_path),
         ]),
     ];
+
+    // Show certificate metadata from DB if available
+    if let Some(cert) = &app.cert_info {
+        text.push(Line::from(vec![
+            Span::styled("Subject: ", Style::default().fg(Color::Cyan)),
+            Span::raw(&cert.subject),
+        ]));
+        text.push(Line::from(vec![
+            Span::styled("Thumb:   ", Style::default().fg(Color::Cyan)),
+            Span::raw(&cert.thumbprint),
+        ]));
+        text.push(Line::from(vec![
+            Span::styled("Valid:   ", Style::default().fg(Color::Cyan)),
+            Span::raw(format!("{} → {}", cert.not_before, cert.not_after)),
+        ]));
+        text.push(Line::from(vec![
+            Span::styled("On disk: ", Style::default().fg(Color::Cyan)),
+            Span::raw(format!("{}, {}", cert.cert_path, cert.key_path)),
+        ]));
+    } else {
+        text.push(Line::from(Span::styled(
+            "  No certificate in database",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
 
     let block = Block::default()
         .borders(Borders::ALL)

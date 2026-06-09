@@ -41,3 +41,17 @@ pub struct Session {
     pub connected_at: String,
     pub disconnected_at: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct CertificateInfo {
+    pub id: i64,
+    pub thumbprint: String,
+    pub subject: String,
+    pub san_names: String, // JSON array
+    pub not_before: String,
+    pub not_after: String,
+    pub cert_path: String,
+    pub key_path: String,
+    pub auto_generated: bool,
+    pub created_at: String,
+}

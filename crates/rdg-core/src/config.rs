@@ -1,7 +1,7 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ServerConfig {
     pub listen_addr: String,
     pub listen_port: u16,
@@ -11,20 +11,23 @@ pub struct ServerConfig {
     pub server_name: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TlsConfig {
     pub cert_path: Option<PathBuf>,
     pub key_path: Option<PathBuf>,
     /// If true and no cert/key paths given, generate self-signed
     pub auto_generate: bool,
+    /// Additional Subject Alternative Names for the self-signed certificate
+    #[serde(default)]
+    pub san_names: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DatabaseConfig {
     pub url: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct AuthConfig {
     /// Kerberos SPN (e.g. "HTTP/gateway.domain.com"). Auto-derived from server_name if not set.
     pub spn: Option<String>,
@@ -44,6 +47,7 @@ impl Default for ServerConfig {
                 cert_path: None,
                 key_path: None,
                 auto_generate: true,
+                san_names: None,
             },
             database: DatabaseConfig {
                 url: "sqlite://rdg-gateway.db?mode=rwc".to_string(),

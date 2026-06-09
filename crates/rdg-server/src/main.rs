@@ -27,6 +27,15 @@ enum Command {
         /// Path to configuration file
         #[arg(short, long, default_value = "rdg-gateway.toml")]
         config: String,
+        /// Additional Subject Alternative Name for the self-signed certificate (repeatable)
+        #[arg(long = "san", value_name = "NAME")]
+        san_names: Vec<String>,
+        /// Path to TLS certificate PEM file (overrides config)
+        #[arg(long, value_name = "PATH")]
+        tls_cert: Option<String>,
+        /// Path to TLS private key PEM file (overrides config)
+        #[arg(long, value_name = "PATH")]
+        tls_key: Option<String>,
     },
     /// Launch the TUI for database management
     Manage {
@@ -42,16 +51,21 @@ async fn main() -> Result<()> {
 
     match cli.command.unwrap_or(Command::Serve {
         config: std::env::var("RDG_CONFIG").unwrap_or_else(|_| "rdg-gateway.toml".to_string()),
+        san_names: Vec::new(),
+        tls_cert: None,
+        tls_key: None,
     }) {
-        Command::Serve { config } => run_serve(&config).await,
+        Command::Serve { config, san_names, tls_cert, tls_key } => {
+            run_serve(&config, san_names, tls_cert, tls_key).await
+        }
         Command::Manage { config } => {
             let cfg = load_config(&config)?;
-            tui::run_manage(cfg).await
+            tui::run_manage(cfg, config).await
         }
     }
 }
 
-async fn run_serve(config_path: &str) -> Result<()> {
+async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<String>, tls_key: Option<String>) -> Result<()> {
     install_crypto_provider();
 
     tracing_subscriber::fmt()
@@ -61,7 +75,24 @@ async fn run_serve(config_path: &str) -> Result<()> {
         )
         .init();
 
-    let config = load_config(config_path)?;
+    let mut config = load_config(config_path)?;
+
+    // Apply CLI overrides
+    if let Some(cert) = tls_cert {
+        config.tls.cert_path = Some(cert.into());
+    }
+    if let Some(key) = tls_key {
+        config.tls.key_path = Some(key.into());
+    }
+    if !cli_sans.is_empty() {
+        let existing = config.tls.san_names.get_or_insert_with(Vec::new);
+        for san in cli_sans {
+            if !existing.contains(&san) {
+                existing.push(san);
+            }
+        }
+    }
+
     tracing::info!(
         "Starting RDG Gateway on {}:{}",
         config.listen_addr,
@@ -118,7 +149,7 @@ async fn build_tls_config(config: &ServerConfig) -> Result<axum_server::tls_rust
         // Collect all useful SANs: server_name + all non-loopback local IPs
         let mut san_names = vec![config.server_name.clone()];
         if let Ok(hostname) = std::env::var("COMPUTERNAME") {
-            if hostname != config.server_name {
+            if hostname != config.server_name && !san_names.contains(&hostname) {
                 san_names.push(hostname);
             }
         }
@@ -138,6 +169,15 @@ async fn build_tls_config(config: &ServerConfig) -> Result<axum_server::tls_rust
             }
         }
         san_names.push("localhost".to_string());
+
+        // Merge custom SANs from config
+        if let Some(custom_sans) = &config.tls.san_names {
+            for san in custom_sans {
+                if !san_names.contains(san) {
+                    san_names.push(san.clone());
+                }
+            }
+        }
 
         tracing::info!(
             "Generating self-signed TLS certificate for SANs: {:?}",

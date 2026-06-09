@@ -17,6 +17,9 @@ pub fn draw(f: &mut Frame, app: &App) {
         InputMode::AddGroup => " Add Group ",
         InputMode::AddAclRule => " Add ACL Rule ",
         InputMode::AssignGroup => " Assign Group ",
+        InputMode::AddSan => " Add SAN ",
+        InputMode::SetCertPath => " Set Certificate Path ",
+        InputMode::SetKeyPath => " Set Key Path ",
         InputMode::Normal => return,
     };
 

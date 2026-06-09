@@ -3,6 +3,7 @@ pub mod dialogs;
 pub mod groups;
 pub mod sessions;
 pub mod tabs;
+pub mod tls;
 pub mod users;
 
 use crate::tui::app::{ActiveTab, App, InputMode};
@@ -29,6 +30,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         ActiveTab::Groups => groups::draw(f, app, chunks[1]),
         ActiveTab::AclRules => acl::draw(f, app, chunks[1]),
         ActiveTab::Sessions => sessions::draw(f, app, chunks[1]),
+        ActiveTab::Tls => tls::draw(f, app, chunks[1]),
     }
 
     draw_status_bar(f, app, chunks[2]);
@@ -40,7 +42,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 fn draw_tab_bar(f: &mut Frame, app: &App, area: Rect) {
-    let titles: Vec<Line> = ["Users", "Groups", "ACL Rules", "Sessions"]
+    let titles: Vec<Line> = ["Users", "Groups", "ACL Rules", "Sessions", "TLS"]
         .iter()
         .map(|t| Line::from(Span::styled(*t, Style::default().fg(Color::White))))
         .collect();
@@ -65,6 +67,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             ActiveTab::Groups => " Tab:switch  ↑↓:navigate  a:add  q:quit ",
             ActiveTab::AclRules => " Tab:switch  ↑↓:navigate  a:add  d:delete  q:quit ",
             ActiveTab::Sessions => " Tab:switch  ↑↓:navigate  r:refresh  q:quit ",
+            ActiveTab::Tls => " Tab:switch  ↑↓:navigate  a:add SAN  d:delete SAN  e:cert path  k:key path  s:save  q:quit ",
         },
         _ => " Enter:confirm  Tab:next field  Esc:cancel ",
     };

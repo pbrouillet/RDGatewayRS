@@ -5,6 +5,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
+use rdg_core::config::ServerConfig;
 use rdg_core::db::DbProvider;
 use rdg_core::db::models::{AclRule, Group, Session, User};
 use std::io;
@@ -19,6 +20,7 @@ pub enum ActiveTab {
     Groups = 1,
     AclRules = 2,
     Sessions = 3,
+    Tls = 4,
 }
 
 impl ActiveTab {
@@ -27,16 +29,18 @@ impl ActiveTab {
             Self::Users => Self::Groups,
             Self::Groups => Self::AclRules,
             Self::AclRules => Self::Sessions,
-            Self::Sessions => Self::Users,
+            Self::Sessions => Self::Tls,
+            Self::Tls => Self::Users,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Users => Self::Sessions,
+            Self::Users => Self::Tls,
             Self::Groups => Self::Users,
             Self::AclRules => Self::Groups,
             Self::Sessions => Self::AclRules,
+            Self::Tls => Self::Sessions,
         }
     }
 }
@@ -48,6 +52,9 @@ pub enum InputMode {
     AddGroup,
     AddAclRule,
     AssignGroup,
+    AddSan,
+    SetCertPath,
+    SetKeyPath,
 }
 
 #[derive(Debug, Clone)]
@@ -122,6 +129,8 @@ impl DialogState {
 
 pub struct App {
     pub db: Arc<dyn DbProvider>,
+    pub config: ServerConfig,
+    pub config_path: String,
     pub active_tab: ActiveTab,
     pub input_mode: InputMode,
     pub dialog: Option<DialogState>,
@@ -139,15 +148,18 @@ pub struct App {
     pub group_index: usize,
     pub acl_index: usize,
     pub session_index: usize,
+    pub tls_san_index: usize,
 
     // Group membership cache: user_id -> Vec<Group>
     pub user_groups: std::collections::HashMap<i64, Vec<Group>>,
 }
 
 impl App {
-    pub fn new(db: Arc<dyn DbProvider>) -> Self {
+    pub fn new(db: Arc<dyn DbProvider>, config: ServerConfig, config_path: String) -> Self {
         Self {
             db,
+            config,
+            config_path,
             active_tab: ActiveTab::Users,
             input_mode: InputMode::Normal,
             dialog: None,
@@ -161,6 +173,7 @@ impl App {
             group_index: 0,
             acl_index: 0,
             session_index: 0,
+            tls_san_index: 0,
             user_groups: std::collections::HashMap::new(),
         }
     }
@@ -239,7 +252,7 @@ impl App {
             KeyCode::BackTab => {
                 self.active_tab = self.active_tab.prev();
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.move_selection(-1);
             }
             KeyCode::Down | KeyCode::Char('j') => {
@@ -260,6 +273,31 @@ impl App {
                 if self.active_tab == ActiveTab::Sessions {
                     self.sessions = self.db.get_active_sessions().await?;
                     self.status_message = Some("Sessions refreshed".to_string());
+                }
+            }
+            KeyCode::Char('e') => {
+                if self.active_tab == ActiveTab::Tls {
+                    self.input_mode = InputMode::SetCertPath;
+                    let current = self.config.tls.cert_path.as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
+                    let mut field = DialogField::text("Certificate PEM path");
+                    field.value = current;
+                    self.dialog = Some(DialogState::new(vec![field]));
+                }
+            }
+            KeyCode::Char('k') if self.active_tab == ActiveTab::Tls => {
+                self.input_mode = InputMode::SetKeyPath;
+                let current = self.config.tls.key_path.as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                let mut field = DialogField::text("Private Key PEM path");
+                field.value = current;
+                self.dialog = Some(DialogState::new(vec![field]));
+            }
+            KeyCode::Char('s') => {
+                if self.active_tab == ActiveTab::Tls {
+                    self.save_config()?;
                 }
             }
             _ => {}
@@ -328,6 +366,10 @@ impl App {
             ActiveTab::Groups => (&mut self.group_index, self.groups.len()),
             ActiveTab::AclRules => (&mut self.acl_index, self.acl_rules.len()),
             ActiveTab::Sessions => (&mut self.session_index, self.sessions.len()),
+            ActiveTab::Tls => {
+                let san_count = self.config.tls.san_names.as_ref().map_or(0, |v| v.len());
+                (&mut self.tls_san_index, san_count)
+            }
         };
         if len == 0 {
             return;
@@ -365,6 +407,10 @@ impl App {
                 ]));
             }
             ActiveTab::Sessions => {} // read-only
+            ActiveTab::Tls => {
+                self.input_mode = InputMode::AddSan;
+                self.dialog = Some(DialogState::new(vec![DialogField::text("SAN Name (DNS or IP)")]));
+            }
         }
     }
 
@@ -405,6 +451,17 @@ impl App {
                         self.acl_index = self.acl_rules.len().saturating_sub(1);
                     }
                     self.status_message = Some("ACL rule deleted".to_string());
+                }
+            }
+            ActiveTab::Tls => {
+                if let Some(sans) = &mut self.config.tls.san_names {
+                    if self.tls_san_index < sans.len() {
+                        let removed = sans.remove(self.tls_san_index);
+                        if self.tls_san_index > 0 && self.tls_san_index >= sans.len() {
+                            self.tls_san_index = sans.len().saturating_sub(1);
+                        }
+                        self.status_message = Some(format!("Removed SAN '{}'", removed));
+                    }
                 }
             }
             _ => {}
@@ -487,10 +544,51 @@ impl App {
                 }
             }
             InputMode::Normal => {}
+            InputMode::AddSan => {
+                let san = dialog.field_value(0).to_string();
+                if san.is_empty() {
+                    self.status_message = Some("SAN name required".to_string());
+                    return Ok(());
+                }
+                let sans = self.config.tls.san_names.get_or_insert_with(Vec::new);
+                if sans.contains(&san) {
+                    self.status_message = Some(format!("SAN '{}' already exists", san));
+                } else {
+                    sans.push(san.clone());
+                    self.status_message = Some(format!("Added SAN '{}'", san));
+                }
+            }
+            InputMode::SetCertPath => {
+                let path = dialog.field_value(0).to_string();
+                if path.is_empty() {
+                    self.config.tls.cert_path = None;
+                    self.status_message = Some("Certificate path cleared".to_string());
+                } else {
+                    self.config.tls.cert_path = Some(path.into());
+                    self.status_message = Some("Certificate path updated".to_string());
+                }
+            }
+            InputMode::SetKeyPath => {
+                let path = dialog.field_value(0).to_string();
+                if path.is_empty() {
+                    self.config.tls.key_path = None;
+                    self.status_message = Some("Key path cleared".to_string());
+                } else {
+                    self.config.tls.key_path = Some(path.into());
+                    self.status_message = Some("Key path updated".to_string());
+                }
+            }
         }
 
         self.input_mode = InputMode::Normal;
         self.dialog = None;
+        Ok(())
+    }
+
+    fn save_config(&mut self) -> Result<()> {
+        let content = toml::to_string_pretty(&self.config)?;
+        std::fs::write(&self.config_path, content)?;
+        self.status_message = Some(format!("Config saved to {}", self.config_path));
         Ok(())
     }
 }

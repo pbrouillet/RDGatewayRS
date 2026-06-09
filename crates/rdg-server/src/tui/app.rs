@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -219,6 +219,10 @@ impl App {
 
             if event::poll(Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
+                    // Only handle Press events (Windows sends Press + Release)
+                    if key.kind != KeyEventKind::Press {
+                        continue;
+                    }
                     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
                         self.should_quit = true;
                     } else {

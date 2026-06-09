@@ -142,6 +142,9 @@ impl GatewaySession {
                     TsgMessage::ChannelCreate(_) => MessageType::ChannelCreate as u16,
                     TsgMessage::ChannelResponse(_) => MessageType::ChannelResponse as u16,
                     TsgMessage::Data(_) => MessageType::Data as u16,
+                    TsgMessage::Keepalive => MessageType::Keepalive as u16,
+                    TsgMessage::CloseChannel { .. } => MessageType::CloseChannel as u16,
+                    TsgMessage::CloseChannelResponse { .. } => MessageType::CloseChannelResponse as u16,
                     TsgMessage::Unknown { msg_type, .. } => *msg_type,
                 };
                 Err(SessionError::UnexpectedMessage(msg_type, state))

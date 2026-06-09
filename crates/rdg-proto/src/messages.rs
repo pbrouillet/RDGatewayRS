@@ -16,6 +16,7 @@ pub const HEADER_SIZE: usize = 8;
 pub enum MessageType {
     HandshakeRequest = 0x0001,
     HandshakeResponse = 0x0002,
+    ExtendedAuthMsg = 0x0003,
     TunnelCreate = 0x0004,
     TunnelResponse = 0x0005,
     TunnelAuth = 0x0006,
@@ -24,7 +25,10 @@ pub enum MessageType {
     ChannelResponse = 0x0009,
     Data = 0x000A,
     ServiceMessage = 0x000B,
-    ReasuthMessage = 0x000C,
+    ReauthMessage = 0x000C,
+    Keepalive = 0x000D,
+    CloseChannel = 0x000E,
+    CloseChannelResponse = 0x000F,
 }
 
 impl MessageType {
@@ -32,6 +36,7 @@ impl MessageType {
         match v {
             0x0001 => Some(Self::HandshakeRequest),
             0x0002 => Some(Self::HandshakeResponse),
+            0x0003 => Some(Self::ExtendedAuthMsg),
             0x0004 => Some(Self::TunnelCreate),
             0x0005 => Some(Self::TunnelResponse),
             0x0006 => Some(Self::TunnelAuth),
@@ -40,7 +45,10 @@ impl MessageType {
             0x0009 => Some(Self::ChannelResponse),
             0x000A => Some(Self::Data),
             0x000B => Some(Self::ServiceMessage),
-            0x000C => Some(Self::ReasuthMessage),
+            0x000C => Some(Self::ReauthMessage),
+            0x000D => Some(Self::Keepalive),
+            0x000E => Some(Self::CloseChannel),
+            0x000F => Some(Self::CloseChannelResponse),
             _ => None,
         }
     }
@@ -652,6 +660,40 @@ impl DataMessage {
     }
 }
 
+/// Write a keepalive response message (type 0x0D, empty payload).
+pub fn write_keepalive(buf: &mut BytesMut) {
+    let len = HEADER_SIZE as u32;
+    MessageHeader {
+        msg_type: MessageType::Keepalive as u16,
+        reserved: 0,
+        length: len,
+    }
+    .write(buf);
+}
+
+/// Write a close channel response (type 0x0F, echo payload).
+pub fn write_close_channel_response(buf: &mut BytesMut) {
+    let len = HEADER_SIZE as u32;
+    MessageHeader {
+        msg_type: MessageType::CloseChannelResponse as u16,
+        reserved: 0,
+        length: len,
+    }
+    .write(buf);
+}
+
+/// Write a raw echo response: same message type + payload echoed back.
+pub fn write_echo_response(msg_type: u16, payload: &[u8], buf: &mut BytesMut) {
+    let len = (HEADER_SIZE + payload.len()) as u32;
+    MessageHeader {
+        msg_type,
+        reserved: 0,
+        length: len,
+    }
+    .write(buf);
+    buf.put_slice(payload);
+}
+
 // --- Parsed message enum ---
 
 #[derive(Debug, Clone)]
@@ -665,6 +707,9 @@ pub enum TsgMessage {
     ChannelCreate(ChannelCreate),
     ChannelResponse(ChannelResponse),
     Data(DataMessage),
+    Keepalive,
+    CloseChannel { payload: Bytes },
+    CloseChannelResponse { payload: Bytes },
     Unknown { msg_type: u16, payload: Bytes },
 }
 
@@ -707,6 +752,13 @@ pub fn parse_message(buf: &[u8]) -> Result<TsgMessage, MessageError> {
             ChannelResponse::parse(payload)?,
         )),
         Some(MessageType::Data) => Ok(TsgMessage::Data(DataMessage::parse(payload))),
+        Some(MessageType::Keepalive) => Ok(TsgMessage::Keepalive),
+        Some(MessageType::CloseChannel) => Ok(TsgMessage::CloseChannel {
+            payload: Bytes::copy_from_slice(payload),
+        }),
+        Some(MessageType::CloseChannelResponse) => Ok(TsgMessage::CloseChannelResponse {
+            payload: Bytes::copy_from_slice(payload),
+        }),
         _ => Ok(TsgMessage::Unknown {
             msg_type: header.msg_type,
             payload: Bytes::copy_from_slice(payload),

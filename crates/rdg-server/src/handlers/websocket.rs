@@ -264,7 +264,6 @@ where
                 info!("Starting relay to {}:{}", target_host, target_port);
 
                 // Reunite and start relay using tungstenite streams
-                // For now, just connect TCP and relay manually
                 let target_addr = format!("{}:{}", target_host, target_port);
                 let tcp_stream = match tokio::net::TcpStream::connect(&target_addr).await {
                     Ok(s) => s,
@@ -276,20 +275,30 @@ where
 
                 let (mut tcp_read, mut tcp_write) = tcp_stream.into_split();
 
-                // Send initial data
+                // Send initial data — strip 2-byte cbDataLength prefix
                 use tokio::io::AsyncWriteExt;
-                if let Err(e) = tcp_write.write_all(&data_msg.data).await {
+                let rdp_data = if data_msg.data.len() >= 2 {
+                    &data_msg.data[2..]
+                } else {
+                    &data_msg.data[..]
+                };
+                if let Err(e) = tcp_write.write_all(rdp_data).await {
                     error!("Failed to send initial data: {}", e);
                     return;
                 }
 
-                // WS → TCP task
+                // WS → TCP task: strip 2-byte cbDataLength from each data message
                 let ws_to_tcp = tokio::spawn(async move {
                     while let Some(Ok(msg)) = ws_stream.next().await {
                         if let TMessage::Binary(data) = msg {
                             match messages::parse_message(&data) {
                                 Ok(TsgMessage::Data(d)) => {
-                                    if tcp_write.write_all(&d.data).await.is_err() {
+                                    let payload = if d.data.len() >= 2 {
+                                        &d.data[2..]
+                                    } else {
+                                        &d.data[..]
+                                    };
+                                    if tcp_write.write_all(payload).await.is_err() {
                                         break;
                                     }
                                 }
@@ -300,7 +309,7 @@ where
                     let _ = tcp_write.shutdown().await;
                 });
 
-                // TCP → WS task
+                // TCP → WS task: add 2-byte cbDataLength prefix
                 let tcp_to_ws = tokio::spawn(async move {
                     use rdg_proto::websocket::encode_data_message;
                     use tokio::io::AsyncReadExt;

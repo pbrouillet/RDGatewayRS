@@ -25,9 +25,17 @@ pub fn message_length(ws_payload: &[u8]) -> Result<usize, MessageError> {
 }
 
 /// Encode a raw payload into a TSG Data message suitable for WebSocket send.
+/// Adds the 2-byte cbDataLength prefix before the payload as per MS-RDPEGW.
 pub fn encode_data_message(data: &[u8]) -> Bytes {
-    let mut buf = BytesMut::with_capacity(HEADER_SIZE + data.len());
-    messages::DataMessage::write(data, &mut buf);
+    let mut buf = BytesMut::with_capacity(HEADER_SIZE + 2 + data.len());
+    // Build the full payload: [cbDataLength: u16_le][data]
+    let payload_with_len = {
+        let mut p = BytesMut::with_capacity(2 + data.len());
+        p.extend_from_slice(&(data.len() as u16).to_le_bytes());
+        p.extend_from_slice(data);
+        p
+    };
+    messages::DataMessage::write(&payload_with_len, &mut buf);
     buf.freeze()
 }
 
@@ -52,7 +60,13 @@ mod tests {
         let encoded = encode_data_message(payload);
         let decoded = decode_ws_message(&encoded).unwrap();
         match decoded {
-            TsgMessage::Data(d) => assert_eq!(&d.data[..], payload.as_slice()),
+            TsgMessage::Data(d) => {
+                // Data includes 2-byte cbDataLength prefix + payload
+                assert_eq!(d.data.len(), 2 + payload.len());
+                let cb_len = u16::from_le_bytes([d.data[0], d.data[1]]) as usize;
+                assert_eq!(cb_len, payload.len());
+                assert_eq!(&d.data[2..], payload.as_slice());
+            }
             _ => panic!("Expected Data message"),
         }
     }
@@ -69,7 +83,7 @@ mod tests {
         let data = b"12345";
         let encoded = encode_data_message(data);
         let len = message_length(&encoded).unwrap();
-        assert_eq!(len, HEADER_SIZE + data.len());
+        assert_eq!(len, HEADER_SIZE + 2 + data.len()); // header + cbDataLength + data
         assert_eq!(len, encoded.len());
     }
 
@@ -93,10 +107,15 @@ mod tests {
     #[test]
     fn encode_empty_data() {
         let encoded = encode_data_message(&[]);
-        assert_eq!(encoded.len(), HEADER_SIZE); // just the header
+        // header + 2-byte cbDataLength (value=0)
+        assert_eq!(encoded.len(), HEADER_SIZE + 2);
         let decoded = decode_ws_message(&encoded).unwrap();
         match decoded {
-            TsgMessage::Data(d) => assert!(d.data.is_empty()),
+            TsgMessage::Data(d) => {
+                // 2 bytes for cbDataLength=0, no actual data
+                assert_eq!(d.data.len(), 2);
+                assert_eq!(&d.data[..], &[0u8, 0u8]);
+            }
             _ => panic!("Expected Data message"),
         }
     }

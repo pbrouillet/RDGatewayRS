@@ -1,6 +1,8 @@
 mod handlers;
+mod metrics;
 mod relay;
 mod state;
+mod telemetry;
 mod tui;
 
 use anyhow::Result;
@@ -11,7 +13,6 @@ use rdg_core::db::{DbProvider, SqliteProvider};
 use state::AppState;
 use std::net::SocketAddr;
 use std::sync::{Arc, Once};
-use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "rdg-server", about = "Lightweight RD Gateway server")]
@@ -68,14 +69,10 @@ async fn main() -> Result<()> {
 async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<String>, tls_key: Option<String>) -> Result<()> {
     install_crypto_provider();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,rdg_server=debug,rdg_core=debug")),
-        )
-        .init();
-
     let mut config = load_config(config_path)?;
+
+    // Initialize telemetry (must come after config load so we know the endpoint)
+    telemetry::init(&config.telemetry)?;
 
     // Apply CLI overrides
     if let Some(cert) = tls_cert {
@@ -115,10 +112,18 @@ async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<St
 
     tracing::info!("Listening on https://{}", addr);
 
-    axum_server::bind_rustls(addr, tls_config)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-        .await?;
+    let server = axum_server::bind_rustls(addr, tls_config)
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>());
 
+    // Run server with graceful shutdown on Ctrl+C
+    tokio::select! {
+        result = server => { result?; }
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("Shutting down...");
+        }
+    }
+
+    telemetry::shutdown();
     Ok(())
 }
 

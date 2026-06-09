@@ -53,6 +53,12 @@ thiserror = "2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 
+# OpenTelemetry
+opentelemetry = { version = "0.29", features = ["trace", "metrics"] }
+opentelemetry_sdk = { version = "0.29", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.29", features = ["grpc-tonic", "trace", "metrics", "logs"] }
+tracing-opentelemetry = "0.30"
+
 # Internal crates
 rdg-proto = { path = "crates/rdg-proto" }
 rdg-core = { path = "crates/rdg-core" }

@@ -1,9 +1,11 @@
 //! TCP relay: bidirectional copy between WebSocket and backend TCP.
 
+use crate::metrics;
 use axum::extract::ws::{Message, WebSocket};
 use bytes::Bytes;
 use futures::stream::StreamExt;
 use futures::SinkExt;
+use opentelemetry::KeyValue;
 use rdg_proto::messages;
 use rdg_proto::websocket::encode_data_message;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -20,10 +22,16 @@ pub async fn start_relay(
     let target_addr = format!("{}:{}", target_host, target_port);
     info!("Connecting to backend: {}", target_addr);
 
+    let m = metrics::get();
+    let attrs = [KeyValue::new("target", target_addr.clone())];
+    m.connections_active.add(1, &attrs);
+    let start = std::time::Instant::now();
+
     let tcp_stream = match TcpStream::connect(&target_addr).await {
         Ok(s) => s,
         Err(e) => {
             error!("Failed to connect to backend {}: {}", target_addr, e);
+            m.connections_active.add(-1, &attrs);
             return;
         }
     };
@@ -35,6 +43,7 @@ pub async fn start_relay(
     if let Some(data) = initial_data {
         if let Err(e) = tcp_write.write_all(&data).await {
             error!("Failed to send initial data to backend: {}", e);
+            m.connections_active.add(-1, &attrs);
             return;
         }
         debug!("Sent {} bytes initial data to backend", data.len());
@@ -101,5 +110,9 @@ pub async fn start_relay(
     });
 
     let _ = tokio::join!(ws_to_tcp, tcp_to_ws);
-    info!("Relay session ended");
+
+    let duration = start.elapsed().as_secs_f64();
+    m.connections_active.add(-1, &attrs);
+    m.relay_duration_seconds.record(duration, &attrs);
+    info!("Relay session ended (duration: {:.1}s)", duration);
 }

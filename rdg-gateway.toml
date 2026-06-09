@@ -12,3 +12,8 @@ url = "sqlite://C:/src/rdg-gateway/rdg-gateway.db?mode=rwc"
 # spn = "HTTP/gateway.domain.com"    # Auto-derived from server_name if not set
 # keytab_path = "/etc/rdg-gateway/krb5.keytab"  # Linux/macOS only
 open_mode = true  # Accept any NTLM without validation (testing only!)
+
+[telemetry]
+otlp_endpoint = "http://localhost:4317"
+service_name = "rdg-gateway"
+enabled = true

@@ -9,6 +9,8 @@ pub struct ServerConfig {
     pub database: DatabaseConfig,
     pub auth: AuthConfig,
     pub server_name: String,
+    #[serde(default)]
+    pub telemetry: TelemetryConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -38,6 +40,36 @@ pub struct AuthConfig {
     pub open_mode: bool,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TelemetryConfig {
+    /// OTLP gRPC endpoint (e.g. "http://localhost:4317")
+    pub otlp_endpoint: Option<String>,
+    /// Service name reported to OpenTelemetry
+    #[serde(default = "default_service_name")]
+    pub service_name: String,
+    /// Whether telemetry export is enabled
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_service_name() -> String {
+    "rdg-gateway".to_string()
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self {
+            otlp_endpoint: None,
+            service_name: default_service_name(),
+            enabled: true,
+        }
+    }
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -54,6 +86,7 @@ impl Default for ServerConfig {
             },
             auth: AuthConfig::default(),
             server_name: hostname(),
+            telemetry: TelemetryConfig::default(),
         }
     }
 }

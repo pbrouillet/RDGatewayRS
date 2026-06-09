@@ -2,6 +2,7 @@ pub mod health;
 pub mod rpch;
 pub mod websocket;
 
+use crate::metrics;
 use crate::state::AppState;
 use axum::{
     Router,
@@ -13,6 +14,7 @@ use std::sync::Arc;
 use tracing::info;
 
 async fn log_requests(req: Request, next: Next) -> Response {
+    metrics::get().requests_total.add(1, &[]);
     info!(
         "→ {} {} (from {:?})",
         req.method(),

@@ -115,14 +115,35 @@ async fn build_tls_config(config: &ServerConfig) -> Result<axum_server::tls_rust
         let tls = RustlsConfig::from_pem_file(cert_path, key_path).await?;
         Ok(tls)
     } else if config.tls.auto_generate {
+        // Collect all useful SANs: server_name + all non-loopback local IPs
+        let mut san_names = vec![config.server_name.clone()];
+        if let Ok(hostname) = std::env::var("COMPUTERNAME") {
+            if hostname != config.server_name {
+                san_names.push(hostname);
+            }
+        }
+        // Add all local IPv4 addresses
+        if let Ok(addrs) = std::net::UdpSocket::bind("0.0.0.0:0")
+            .and_then(|s| { s.connect("8.8.8.8:80")?; s.local_addr() })
+        {
+            san_names.push(addrs.ip().to_string());
+        }
+        // Also enumerate all interfaces
+        for iface in netdev::get_interfaces() {
+            for addr in &iface.ipv4 {
+                let ip = addr.addr().to_string();
+                if !ip.starts_with("127.") && !san_names.contains(&ip) {
+                    san_names.push(ip);
+                }
+            }
+        }
+        san_names.push("localhost".to_string());
+
         tracing::info!(
-            "Generating self-signed TLS certificate for {}",
-            config.server_name
+            "Generating self-signed TLS certificate for SANs: {:?}",
+            san_names
         );
-        let cert = rcgen::generate_simple_self_signed(vec![
-            config.server_name.clone(),
-            config.listen_addr.clone(),
-        ])?;
+        let cert = rcgen::generate_simple_self_signed(san_names)?;
 
         let cert_pem = cert.cert.pem();
         let key_pem = cert.key_pair.serialize_pem();

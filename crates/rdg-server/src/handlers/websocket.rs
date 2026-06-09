@@ -59,7 +59,11 @@ async fn rdg_handler(
         .unwrap_or("")
         .to_string();
 
-    debug!("RDG request from {} method={} auth={}", addr, req.method(), !auth_header.is_empty());
+    debug!(
+        "RDG request from {} method={} auth={} headers: {:?}",
+        addr, req.method(), !auth_header.is_empty(),
+        req.headers().iter().map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("?"))).collect::<Vec<_>>()
+    );
 
     // Step 1: No auth header → return bare "Negotiate" challenge
     if auth_header.is_empty() {
@@ -143,6 +147,11 @@ fn do_websocket_upgrade(
         .and_then(|v| v.to_str().ok())
         .map(|v| v.to_string());
 
+    let ws_protocol = headers
+        .get("sec-websocket-protocol")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_string());
+
     if !has_upgrade || !has_connection || ws_key.is_none() {
         warn!("Missing WebSocket upgrade headers from {}", addr);
         return (StatusCode::BAD_REQUEST, "Missing WebSocket headers").into_response();
@@ -150,6 +159,8 @@ fn do_websocket_upgrade(
 
     let ws_key = ws_key.unwrap();
     let ws_accept = compute_ws_accept(&ws_key);
+
+    debug!("WebSocket upgrade: protocol={:?}", ws_protocol);
 
     // Use hyper's on_upgrade to get the raw upgraded IO
     let on_upgrade = hyper::upgrade::on(req);
@@ -177,14 +188,18 @@ fn do_websocket_upgrade(
         }
     });
 
-    // Return 101 Switching Protocols
-    Response::builder()
+    // Return 101 Switching Protocols — must echo Sec-WebSocket-Protocol if client sent it
+    let mut resp = Response::builder()
         .status(StatusCode::SWITCHING_PROTOCOLS)
         .header(header::UPGRADE, "websocket")
         .header(header::CONNECTION, "Upgrade")
-        .header("Sec-WebSocket-Accept", ws_accept)
-        .body(Body::empty())
-        .unwrap()
+        .header("Sec-WebSocket-Accept", ws_accept);
+
+    if let Some(proto) = ws_protocol {
+        resp = resp.header("Sec-WebSocket-Protocol", proto);
+    }
+
+    resp.body(Body::empty()).unwrap()
 }
 
 /// Compute Sec-WebSocket-Accept from the client key (RFC 6455)
@@ -236,8 +251,10 @@ where
         };
 
         debug!(
-            "Received TSG message: {:?}",
-            std::mem::discriminant(&tsg_msg)
+            "Received TSG message: {:?} (raw {} bytes: {:02x?})",
+            std::mem::discriminant(&tsg_msg),
+            msg.len(),
+            &msg[..msg.len().min(64)]
         );
 
         if session.is_data_transfer() {
@@ -311,6 +328,11 @@ where
         match session.process_message(&tsg_msg) {
             Ok(Some(response)) => {
                 use tokio_tungstenite::tungstenite::Message as TMessage;
+                debug!(
+                    "Sending TSG response ({} bytes): {:02x?}",
+                    response.len(),
+                    &response[..response.len().min(64)]
+                );
                 if ws_sink
                     .send(TMessage::Binary(response))
                     .await

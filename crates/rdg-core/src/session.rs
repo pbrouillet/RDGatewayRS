@@ -77,10 +77,12 @@ impl GatewaySession {
 
                 let response = TunnelResponse {
                     server_version: 0,
-                    status_code: 0,
-                    tunnel_id: self.tunnel_id,
-                    caps: 0x09,
-                    max_len: 0x0d,
+                    error_code: 0,
+                    fields_present: HTTP_TUNNEL_RESPONSE_FIELD_TUNNEL_ID
+                        | HTTP_TUNNEL_RESPONSE_FIELD_CAPS,
+                    reserved: 0,
+                    tunnel_id: Some(self.tunnel_id),
+                    caps: Some(0x0d), // NAP_QUAR_SOH | CONSENT_SIGN | SERVICE_MSG
                 };
                 let mut buf = BytesMut::new();
                 response.write(&mut buf);
@@ -112,10 +114,11 @@ impl GatewaySession {
 
                 let response = ChannelResponse {
                     error_code: 0,
-                    flags: 0x0007,
-                    fields_present: 0x0001, // bit 0 = channel_id present
-                    channel_id: self.channel_id,
-                    certificate: None, // TODO: include server cert for full compatibility
+                    fields_present: HTTP_CHANNEL_RESPONSE_FIELD_CHANNELID,
+                    reserved: 0,
+                    channel_id: Some(self.channel_id),
+                    udp_port: None,
+                    auth_cookie: None,
                 };
                 let mut buf = BytesMut::new();
                 response.write(&mut buf);

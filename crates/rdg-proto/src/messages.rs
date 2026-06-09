@@ -257,18 +257,33 @@ impl TunnelCreate {
     }
 }
 
+/// Tunnel response fields-present flags (bitmask)
+pub const HTTP_TUNNEL_RESPONSE_FIELD_TUNNEL_ID: u16 = 0x0001;
+pub const HTTP_TUNNEL_RESPONSE_FIELD_CAPS: u16 = 0x0002;
+pub const HTTP_TUNNEL_RESPONSE_FIELD_SOH_REQ: u16 = 0x0004;
+pub const HTTP_TUNNEL_RESPONSE_FIELD_CONSENT_MSG: u16 = 0x0010;
+
 #[derive(Debug, Clone)]
 pub struct TunnelResponse {
     pub server_version: u16,
-    pub status_code: u32,
-    pub tunnel_id: u32,
-    pub caps: u32,
-    pub max_len: u32,
+    pub error_code: u32,
+    pub fields_present: u16,
+    pub reserved: u16,
+    pub tunnel_id: Option<u32>,
+    pub caps: Option<u32>,
 }
 
 impl TunnelResponse {
     pub fn write(&self, buf: &mut BytesMut) {
-        let len = (HEADER_SIZE + 18) as u32;
+        // Calculate payload size: 2 + 4 + 2 + 2 = 10 fixed, plus optional fields
+        let mut payload_size: u32 = 10;
+        if self.tunnel_id.is_some() {
+            payload_size += 4;
+        }
+        if self.caps.is_some() {
+            payload_size += 4;
+        }
+        let len = HEADER_SIZE as u32 + payload_size;
         MessageHeader {
             msg_type: MessageType::TunnelResponse as u16,
             reserved: 0,
@@ -276,31 +291,61 @@ impl TunnelResponse {
         }
         .write(buf);
         buf.put_u16_le(self.server_version);
-        buf.put_u32_le(self.status_code);
-        buf.put_u32_le(self.tunnel_id);
-        buf.put_u32_le(self.caps);
-        buf.put_u32_le(self.max_len);
+        buf.put_u32_le(self.error_code);
+        buf.put_u16_le(self.fields_present);
+        buf.put_u16_le(self.reserved);
+        if let Some(tid) = self.tunnel_id {
+            buf.put_u32_le(tid);
+        }
+        if let Some(caps) = self.caps {
+            buf.put_u32_le(caps);
+        }
     }
 
     pub fn parse(payload: &[u8]) -> Result<Self, MessageError> {
-        if payload.len() < 18 {
+        if payload.len() < 10 {
             return Err(MessageError::BufferTooShort {
-                needed: 18,
+                needed: 10,
                 have: payload.len(),
             });
         }
         let mut r = payload;
         let server_version = r.get_u16_le();
-        let status_code = r.get_u32_le();
-        let tunnel_id = r.get_u32_le();
-        let caps = r.get_u32_le();
-        let max_len = r.get_u32_le();
+        let error_code = r.get_u32_le();
+        let fields_present = r.get_u16_le();
+        let reserved = r.get_u16_le();
+
+        let tunnel_id = if fields_present & HTTP_TUNNEL_RESPONSE_FIELD_TUNNEL_ID != 0 {
+            if r.remaining() < 4 {
+                return Err(MessageError::BufferTooShort {
+                    needed: 4,
+                    have: r.remaining(),
+                });
+            }
+            Some(r.get_u32_le())
+        } else {
+            None
+        };
+
+        let caps = if fields_present & HTTP_TUNNEL_RESPONSE_FIELD_CAPS != 0 {
+            if r.remaining() < 4 {
+                return Err(MessageError::BufferTooShort {
+                    needed: 4,
+                    have: r.remaining(),
+                });
+            }
+            Some(r.get_u32_le())
+        } else {
+            None
+        };
+
         Ok(Self {
             server_version,
-            status_code,
+            error_code,
+            fields_present,
+            reserved,
             tunnel_id,
             caps,
-            max_len,
         })
     }
 }
@@ -462,25 +507,34 @@ impl ChannelCreate {
     }
 }
 
+/// Channel response fields-present flags (bitmask)
+pub const HTTP_CHANNEL_RESPONSE_FIELD_CHANNELID: u16 = 0x0001;
+pub const HTTP_CHANNEL_RESPONSE_FIELD_UDPPORT: u16 = 0x0002;
+pub const HTTP_CHANNEL_RESPONSE_FIELD_AUTHNCOOKIE: u16 = 0x0004;
+
 #[derive(Debug, Clone)]
 pub struct ChannelResponse {
     pub error_code: u32,
-    pub flags: u16,
     pub fields_present: u16,
-    pub channel_id: u32,
-    /// Optional server certificate (DER or PKCS7)
-    pub certificate: Option<Bytes>,
+    pub reserved: u16,
+    pub channel_id: Option<u32>,
+    pub udp_port: Option<u16>,
+    pub auth_cookie: Option<Bytes>,
 }
 
 impl ChannelResponse {
     pub fn write(&self, buf: &mut BytesMut) {
-        let cert_data = self.certificate.as_ref().map(|c| c.as_ref()).unwrap_or(&[]);
-        let payload_size = 12
-            + if cert_data.is_empty() {
-                0
-            } else {
-                4 + cert_data.len()
-            };
+        // Calculate payload size: 4 + 2 + 2 = 8 fixed, plus optional fields
+        let mut payload_size: usize = 8;
+        if self.channel_id.is_some() {
+            payload_size += 4;
+        }
+        if self.udp_port.is_some() {
+            payload_size += 2;
+        }
+        if let Some(ref cookie) = self.auth_cookie {
+            payload_size += 2 + cookie.len();
+        }
         let len = (HEADER_SIZE + payload_size) as u32;
         MessageHeader {
             msg_type: MessageType::ChannelResponse as u16,
@@ -489,47 +543,85 @@ impl ChannelResponse {
         }
         .write(buf);
         buf.put_u32_le(self.error_code);
-        buf.put_u16_le(self.flags);
         buf.put_u16_le(self.fields_present);
-        buf.put_u32_le(self.channel_id);
-        if !cert_data.is_empty() {
-            buf.put_u32_le(cert_data.len() as u32);
-            buf.put_slice(cert_data);
+        buf.put_u16_le(self.reserved);
+        if let Some(cid) = self.channel_id {
+            buf.put_u32_le(cid);
+        }
+        if let Some(port) = self.udp_port {
+            buf.put_u16_le(port);
+        }
+        if let Some(ref cookie) = self.auth_cookie {
+            buf.put_u16_le(cookie.len() as u16);
+            buf.put_slice(cookie);
         }
     }
 
     pub fn parse(payload: &[u8]) -> Result<Self, MessageError> {
-        if payload.len() < 12 {
+        if payload.len() < 8 {
             return Err(MessageError::BufferTooShort {
-                needed: 12,
+                needed: 8,
                 have: payload.len(),
             });
         }
 
         let mut r = payload;
         let error_code = r.get_u32_le();
-        let flags = r.get_u16_le();
         let fields_present = r.get_u16_le();
-        let channel_id = r.get_u32_le();
-        let certificate = if r.remaining() >= 4 {
-            let cert_len = r.get_u32_le() as usize;
-            if r.remaining() < cert_len {
+        let reserved = r.get_u16_le();
+
+        let channel_id = if fields_present & HTTP_CHANNEL_RESPONSE_FIELD_CHANNELID != 0 {
+            if r.remaining() < 4 {
                 return Err(MessageError::BufferTooShort {
-                    needed: cert_len,
+                    needed: 4,
                     have: r.remaining(),
                 });
             }
-            Some(Bytes::copy_from_slice(&r[..cert_len]))
+            Some(r.get_u32_le())
+        } else {
+            None
+        };
+
+        let udp_port = if fields_present & HTTP_CHANNEL_RESPONSE_FIELD_UDPPORT != 0 {
+            if r.remaining() < 2 {
+                return Err(MessageError::BufferTooShort {
+                    needed: 2,
+                    have: r.remaining(),
+                });
+            }
+            Some(r.get_u16_le())
+        } else {
+            None
+        };
+
+        let auth_cookie = if fields_present & HTTP_CHANNEL_RESPONSE_FIELD_AUTHNCOOKIE != 0 {
+            if r.remaining() < 2 {
+                return Err(MessageError::BufferTooShort {
+                    needed: 2,
+                    have: r.remaining(),
+                });
+            }
+            let len = r.get_u16_le() as usize;
+            if r.remaining() < len {
+                return Err(MessageError::BufferTooShort {
+                    needed: len,
+                    have: r.remaining(),
+                });
+            }
+            let data = Bytes::copy_from_slice(&r[..len]);
+            r.advance(len);
+            Some(data)
         } else {
             None
         };
 
         Ok(Self {
             error_code,
-            flags,
             fields_present,
+            reserved,
             channel_id,
-            certificate,
+            udp_port,
+            auth_cookie,
         })
     }
 }
@@ -719,19 +811,20 @@ mod tests {
     fn roundtrip_tunnel_response() {
         let tr = TunnelResponse {
             server_version: 0,
-            status_code: 0,
-            tunnel_id: 42,
-            caps: 0x09,
-            max_len: 0x0d,
+            error_code: 0,
+            fields_present: HTTP_TUNNEL_RESPONSE_FIELD_TUNNEL_ID | HTTP_TUNNEL_RESPONSE_FIELD_CAPS,
+            reserved: 0,
+            tunnel_id: Some(42),
+            caps: Some(0x0d),
         };
         let mut buf = BytesMut::new();
         tr.write(&mut buf);
         let parsed = parse_message(&buf).unwrap();
         match parsed {
             TsgMessage::TunnelResponse(t) => {
-                assert_eq!(t.tunnel_id, 42);
-                assert_eq!(t.caps, 0x09);
-                assert_eq!(t.max_len, 0x0d);
+                assert_eq!(t.tunnel_id, Some(42));
+                assert_eq!(t.caps, Some(0x0d));
+                assert_eq!(t.fields_present, 0x0003);
             }
             _ => panic!("Expected TunnelResponse"),
         }

@@ -106,12 +106,13 @@ async fn test_websocket_gateway_handshake() -> Result<()> {
         let tunnel_id = match tunnel_response {
             TsgMessage::TunnelResponse(response) => {
                 ensure!(
-                    response.status_code == 0,
+                    response.error_code == 0,
                     "tunnel create failed: {:?}",
                     response
                 );
-                ensure!(response.tunnel_id != 0, "server returned tunnel_id 0");
-                response.tunnel_id
+                let tid = response.tunnel_id.unwrap_or(0);
+                ensure!(tid != 0, "server returned tunnel_id 0");
+                tid
             }
             other => bail!("expected TunnelResponse, got {other:?}"),
         };
@@ -159,10 +160,11 @@ async fn test_websocket_gateway_handshake() -> Result<()> {
                     "channel create failed: {:?}",
                     response
                 );
-                ensure!(response.channel_id != 0, "server returned channel_id 0");
+                let cid = response.channel_id.unwrap_or(0);
+                ensure!(cid != 0, "server returned channel_id 0");
                 ensure!(
-                    response.flags == 0x0007,
-                    "unexpected channel flags: {:?}",
+                    response.fields_present & 0x01 != 0,
+                    "channel_id not present in fields: {:?}",
                     response
                 );
             }

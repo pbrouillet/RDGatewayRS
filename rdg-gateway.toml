@@ -1,5 +1,5 @@
 listen_addr = "0.0.0.0"
-listen_port = 4443
+listen_port = 443
 server_name = "WIN-8QEC20TIHO4"
 
 [tls]

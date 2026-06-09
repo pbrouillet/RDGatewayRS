@@ -1,4 +1,0 @@
-[2m2026-06-09T10:58:47.418796Z[0m [32m INFO[0m [2mrdg_server[0m[2m:[0m Starting RDG Gateway on 0.0.0.0:443
-[2m2026-06-09T10:58:47.446573Z[0m [32m INFO[0m [2mrdg_server[0m[2m:[0m Database initialized
-[2m2026-06-09T10:58:47.483547Z[0m [32m INFO[0m [2mrdg_server[0m[2m:[0m Reusing persisted self-signed certificate (thumbprint: F6:FF:8D:74:1B:1)
-[2m2026-06-09T10:58:47.501930Z[0m [32m INFO[0m [2mrdg_server[0m[2m:[0m Listening on https://0.0.0.0:443

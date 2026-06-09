@@ -41,7 +41,22 @@ pub fn routes() -> Router<Arc<AppState>> {
     let challenges: ChallengeStore = Arc::new(Mutex::new(HashMap::new()));
     Router::new()
         .route("/remoteDesktopGateway/", any(rdg_handler))
+        .route("/KdcProxy", any(kdcproxy_handler))
+        .route("/remoteDesktopGateway", any(rdg_handler))
         .layer(axum::Extension(challenges))
+}
+
+/// KdcProxy handler - mstsc POSTs here for Kerberos. Return 503 to force NTLM fallback.
+async fn kdcproxy_handler(req: Request<Body>) -> Response {
+    warn!(
+        "KdcProxy request: {} {} (ignoring - not in domain)",
+        req.method(),
+        req.uri()
+    );
+    Response::builder()
+        .status(StatusCode::SERVICE_UNAVAILABLE)
+        .body(Body::empty())
+        .unwrap()
 }
 
 /// Main handler that processes the NTLM auth flow and WebSocket upgrade.
@@ -266,7 +281,11 @@ where
                 // Reunite and start relay using tungstenite streams
                 let target_addr = format!("{}:{}", target_host, target_port);
                 let tcp_stream = match tokio::net::TcpStream::connect(&target_addr).await {
-                    Ok(s) => s,
+                    Ok(s) => {
+                        // Disable Nagle for low-latency relay (critical for TLS handshakes)
+                        let _ = s.set_nodelay(true);
+                        s
+                    }
                     Err(e) => {
                         error!("Failed to connect to backend {}: {}", target_addr, e);
                         return;
@@ -286,26 +305,58 @@ where
                     error!("Failed to send initial data: {}", e);
                     return;
                 }
+                let _ = tcp_write.flush().await;
+                debug!("Relay: sent {} bytes initial RDP data to backend (hex: {:02x?})", rdp_data.len(), &rdp_data[..rdp_data.len().min(32)]);
 
                 // WS → TCP task: strip 2-byte cbDataLength from each data message
+                let client_addr_log = client_addr;
                 let ws_to_tcp = tokio::spawn(async move {
+                    use tokio::io::AsyncWriteExt;
+                    let mut total_bytes: u64 = 0;
+                    let mut msg_count: u64 = 0;
                     while let Some(Ok(msg)) = ws_stream.next().await {
-                        if let TMessage::Binary(data) = msg {
-                            match messages::parse_message(&data) {
-                                Ok(TsgMessage::Data(d)) => {
-                                    let payload = if d.data.len() >= 2 {
-                                        &d.data[2..]
-                                    } else {
-                                        &d.data[..]
-                                    };
-                                    if tcp_write.write_all(payload).await.is_err() {
-                                        break;
+                        match msg {
+                            TMessage::Binary(data) => {
+                                match messages::parse_message(&data) {
+                                    Ok(TsgMessage::Data(d)) => {
+                                        let payload = if d.data.len() >= 2 {
+                                            &d.data[2..]
+                                        } else {
+                                            &d.data[..]
+                                        };
+                                        total_bytes += payload.len() as u64;
+                                        msg_count += 1;
+                                        if msg_count <= 10 || msg_count % 50 == 0 {
+                                            debug!("Relay WS→TCP #{}: {} bytes (total: {}) first_bytes={:02x?}", msg_count, payload.len(), total_bytes, &payload[..payload.len().min(16)]);
+                                        }
+                                        if tcp_write.write_all(payload).await.is_err() {
+                                            error!("Relay WS→TCP: write to backend failed");
+                                            break;
+                                        }
+                                        let _ = tcp_write.flush().await;
+                                    }
+                                    Ok(other) => {
+                                        warn!("Relay WS→TCP: non-data TSG message during relay: {:?}", std::mem::discriminant(&other));
+                                    }
+                                    Err(e) => {
+                                        error!("Relay WS→TCP: parse error: {}", e);
                                     }
                                 }
-                                _ => {}
+                            }
+                            TMessage::Ping(data) => {
+                                debug!("Relay WS→TCP: got Ping, ignoring (auto-pong should handle)");
+                                // tungstenite should auto-reply Pong
+                            }
+                            TMessage::Close(_) => {
+                                info!("Relay WS→TCP: client sent Close");
+                                break;
+                            }
+                            other => {
+                                debug!("Relay WS→TCP: ignoring {:?}", other);
                             }
                         }
                     }
+                    info!("Relay WS→TCP ended: {} messages, {} bytes from {}", msg_count, total_bytes, client_addr_log);
                     let _ = tcp_write.shutdown().await;
                 });
 
@@ -313,18 +364,33 @@ where
                 let tcp_to_ws = tokio::spawn(async move {
                     use rdg_proto::websocket::encode_data_message;
                     use tokio::io::AsyncReadExt;
-                    let mut buf = vec![0u8; 8192];
+                    let mut buf = vec![0u8; 16384]; // Max TLS record size; keeps cbDataLength in u16 range
+                    let mut total_bytes: u64 = 0;
+                    let mut msg_count: u64 = 0;
                     loop {
                         let n = match tcp_read.read(&mut buf).await {
-                            Ok(0) => break,
+                            Ok(0) => {
+                                info!("Relay TCP→WS: backend closed connection");
+                                break;
+                            }
                             Ok(n) => n,
-                            Err(_) => break,
+                            Err(e) => {
+                                error!("Relay TCP→WS read error: {}", e);
+                                break;
+                            }
                         };
+                        total_bytes += n as u64;
+                        msg_count += 1;
+                        if msg_count <= 10 || msg_count % 50 == 0 {
+                            debug!("Relay TCP→WS #{}: {} bytes (total: {}) first_bytes={:02x?}", msg_count, n, total_bytes, &buf[..n.min(16)]);
+                        }
                         let ws_msg = encode_data_message(&buf[..n]);
                         if ws_sink.send(TMessage::Binary(ws_msg)).await.is_err() {
+                            error!("Relay TCP→WS: WS send failed");
                             break;
                         }
                     }
+                    info!("Relay TCP→WS ended: {} messages, {} bytes", msg_count, total_bytes);
                     let _ = ws_sink.close().await;
                 });
 

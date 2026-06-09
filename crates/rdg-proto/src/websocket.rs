@@ -26,12 +26,15 @@ pub fn message_length(ws_payload: &[u8]) -> Result<usize, MessageError> {
 
 /// Encode a raw payload into a TSG Data message suitable for WebSocket send.
 /// Adds the 2-byte cbDataLength prefix before the payload as per MS-RDPEGW.
+/// Note: cbDataLength is u16, so data.len() must not exceed 65535.
 pub fn encode_data_message(data: &[u8]) -> Bytes {
+    debug_assert!(data.len() <= u16::MAX as usize, "data exceeds u16 max for cbDataLength");
+    let cb_len = (data.len() as u16).min(u16::MAX);
     let mut buf = BytesMut::with_capacity(HEADER_SIZE + 2 + data.len());
     // Build the full payload: [cbDataLength: u16_le][data]
     let payload_with_len = {
         let mut p = BytesMut::with_capacity(2 + data.len());
-        p.extend_from_slice(&(data.len() as u16).to_le_bytes());
+        p.extend_from_slice(&cb_len.to_le_bytes());
         p.extend_from_slice(data);
         p
     };

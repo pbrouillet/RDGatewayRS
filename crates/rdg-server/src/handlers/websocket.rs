@@ -317,11 +317,18 @@ where
                     use tokio::io::AsyncWriteExt;
                     let mut total_bytes: u64 = 0;
                     let mut msg_count: u64 = 0;
+                    // After IN-channel ChannelCreate, skip the next Data msg (duplicate X.224)
+                    let mut skip_next_data = false;
                     while let Some(Ok(msg)) = ws_stream.next().await {
                         match msg {
                             TMessage::Binary(data) => {
                                 match messages::parse_message(&data) {
                                     Ok(TsgMessage::Data(d)) => {
+                                        if skip_next_data {
+                                            debug!("Relay WS→TCP: skipping IN-channel initial Data ({} bytes)", d.data.len());
+                                            skip_next_data = false;
+                                            continue;
+                                        }
                                         let payload = if d.data.len() >= 2 {
                                             &d.data[2..]
                                         } else {
@@ -352,12 +359,22 @@ where
                                         break;
                                     }
                                     Ok(TsgMessage::Unknown { msg_type, payload }) => {
-                                        // Type 0x10 is a control/setup message — acknowledge silently
-                                        // Other unknown types: log and ignore (don't echo back)
-                                        debug!("Relay WS→TCP: unknown TSG type 0x{:02x} ({} bytes payload), ignoring", msg_type, payload.len());
+                                        if msg_type == 0x10 {
+                                            // IN-pipe setup signal — respond with same type to acknowledge
+                                            debug!("Relay WS→TCP: IN-pipe setup (type 0x10), sending acknowledgment");
+                                            let mut buf = bytes::BytesMut::new();
+                                            let resp_len: u32 = 8 + payload.len() as u32;
+                                            buf.extend_from_slice(&(msg_type as u16).to_le_bytes());
+                                            buf.extend_from_slice(&0u16.to_le_bytes()); // reserved
+                                            buf.extend_from_slice(&resp_len.to_le_bytes());
+                                            buf.extend_from_slice(&payload);
+                                            let _ = ctrl_tx.send(buf.freeze()).await;
+                                        } else {
+                                            debug!("Relay WS→TCP: unknown TSG type 0x{:02x} ({} bytes payload), ignoring", msg_type, payload.len());
+                                        }
                                     }
                                     Ok(TsgMessage::ChannelCreate(req)) => {
-                                        // mstsc may re-request channel during relay (e.g. reconnection)
+                                        // IN-channel setup during relay — respond and skip next Data
                                         info!("Relay WS→TCP: ChannelCreate for {}:{}, responding", req.server_name, req.port);
                                         let response = messages::ChannelResponse {
                                             error_code: 0,
@@ -370,6 +387,7 @@ where
                                         let mut buf = bytes::BytesMut::new();
                                         response.write(&mut buf);
                                         let _ = ctrl_tx.send(buf.freeze()).await;
+                                        skip_next_data = true;
                                     }
                                     Ok(other) => {
                                         warn!("Relay WS→TCP: unhandled TSG message during relay: {:?}", other);

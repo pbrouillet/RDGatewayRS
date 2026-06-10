@@ -13,6 +13,8 @@ pub struct ServerConfig {
     pub telemetry: TelemetryConfig,
     #[serde(default)]
     pub webui: WebUiConfig,
+    #[serde(default)]
+    pub guacamole: GuacamoleConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -90,6 +92,7 @@ impl Default for ServerConfig {
             server_name: hostname(),
             telemetry: TelemetryConfig::default(),
             webui: WebUiConfig::default(),
+            guacamole: GuacamoleConfig::default(),
         }
     }
 }
@@ -110,6 +113,37 @@ impl Default for WebUiConfig {
             gateway_url: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GuacamoleConfig {
+    /// Whether guacamole integration is enabled
+    #[serde(default)]
+    pub enabled: bool,
+    /// guacd host (default: localhost)
+    #[serde(default = "guacd_default_host")]
+    pub guacd_host: String,
+    /// guacd port (default: 4822)
+    #[serde(default = "guacd_default_port")]
+    pub guacd_port: u16,
+}
+
+impl Default for GuacamoleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            guacd_host: "localhost".to_string(),
+            guacd_port: 4822,
+        }
+    }
+}
+
+fn guacd_default_host() -> String {
+    "localhost".to_string()
+}
+
+fn guacd_default_port() -> u16 {
+    4822
 }
 
 fn hostname() -> String {

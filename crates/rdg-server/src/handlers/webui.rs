@@ -5,7 +5,7 @@ use axum::{
     body::Body,
     extract::{
         ws::{Message, WebSocket},
-        Path, State, WebSocketUpgrade,
+        Path, Query, State, WebSocketUpgrade,
     },
     http::{header, StatusCode},
     response::{IntoResponse, Response},
@@ -13,10 +13,14 @@ use axum::{
     Json, Router,
 };
 use futures::{SinkExt, StreamExt};
+use hmac::{Hmac, Mac};
 use rdg_core::db::models::Connection;
 use rust_embed::Embed;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 #[derive(Embed)]
@@ -33,6 +37,7 @@ pub fn routes() -> Router<Arc<AppState>> {
         .route("/api/connections/{id}", put(update_connection))
         .route("/api/connections/{id}", delete(delete_connection))
         .route("/api/connections/{id}/rdp", get(download_rdp))
+        .route("/api/connections/{id}/session", post(create_session_token))
         .route("/api/connections/{id}/ws", get(ws_relay))
         // Portal SPA (catch-all for client-side routing)
         .route("/portal/{*path}", get(serve_portal))
@@ -125,13 +130,127 @@ async fn delete_connection(
     Ok(StatusCode::NO_CONTENT)
 }
 
-// --- WebSocket relay (browser ↔ TCP to RDP target) ---
+// --- Session token + WebSocket relay ---
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// Token payload: connection_id + issued_at (Unix seconds)
+const TOKEN_TTL_SECS: u64 = 300; // 5 minutes
+
+fn token_secret(state: &AppState) -> Vec<u8> {
+    // Derive a signing key from the server name (stable per instance)
+    format!("rdg-webui-session:{}", state.config.server_name)
+        .into_bytes()
+}
+
+fn sign_token(connection_id: i64, issued_at: u64, secret: &[u8]) -> String {
+    let payload = format!("{}:{}", connection_id, issued_at);
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC key");
+    mac.update(payload.as_bytes());
+    let sig = mac.finalize().into_bytes();
+    use base64::Engine;
+    let sig_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig);
+    format!("{}.{}", payload, sig_b64)
+}
+
+fn validate_token(token: &str, expected_connection_id: i64, secret: &[u8]) -> bool {
+    let parts: Vec<&str> = token.rsplitn(2, '.').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    let (sig_b64, payload) = (parts[0], parts[1]);
+
+    // Verify signature
+    let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC key");
+    mac.update(payload.as_bytes());
+    use base64::Engine;
+    let sig = match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(sig_b64) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    if mac.verify_slice(&sig).is_err() {
+        return false;
+    }
+
+    // Parse and validate payload
+    let fields: Vec<&str> = payload.split(':').collect();
+    if fields.len() != 2 {
+        return false;
+    }
+    let conn_id: i64 = match fields[0].parse() {
+        Ok(id) => id,
+        Err(_) => return false,
+    };
+    let issued_at: u64 = match fields[1].parse() {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+
+    if conn_id != expected_connection_id {
+        return false;
+    }
+
+    // Check TTL
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    if now.saturating_sub(issued_at) > TOKEN_TTL_SECS {
+        return false;
+    }
+
+    true
+}
+
+#[derive(Serialize)]
+struct SessionTokenResponse {
+    token: String,
+    expires_in: u64,
+}
+
+async fn create_session_token(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<i64>,
+) -> Result<Json<SessionTokenResponse>, StatusCode> {
+    // Verify the connection exists
+    state
+        .db
+        .get_connection(id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let secret = token_secret(&state);
+    let token = sign_token(id, now, &secret);
+
+    Ok(Json(SessionTokenResponse {
+        token,
+        expires_in: TOKEN_TTL_SECS,
+    }))
+}
+
+#[derive(Deserialize)]
+struct WsQueryParams {
+    token: Option<String>,
+}
 
 async fn ws_relay(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
+    Query(params): Query<WsQueryParams>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, StatusCode> {
+    // Validate session token
+    let token = params.token.ok_or(StatusCode::UNAUTHORIZED)?;
+    let secret = token_secret(&state);
+    if !validate_token(&token, id, &secret) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
     let conn = state
         .db
         .get_connection(id)
@@ -146,15 +265,32 @@ async fn handle_ws_relay(ws: WebSocket, conn: Connection) {
     let target = format!("{}:{}", conn.host, conn.port);
     tracing::info!("WebSocket relay: connecting to {}", target);
 
-    let tcp = match TcpStream::connect(&target).await {
-        Ok(stream) => stream,
-        Err(e) => {
+    // TCP connect with 5-second timeout
+    let tcp = match tokio::time::timeout(
+        Duration::from_secs(5),
+        TcpStream::connect(&target),
+    )
+    .await
+    {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(e)) => {
             tracing::error!("WebSocket relay: failed to connect to {}: {}", target, e);
             let (mut sink, _) = ws.split();
             let _ = sink
                 .send(Message::Close(Some(axum::extract::ws::CloseFrame {
                     code: 1011,
-                    reason: format!("Failed to connect to target: {}", e).into(),
+                    reason: format!("Failed to connect: {}", e).into(),
+                })))
+                .await;
+            return;
+        }
+        Err(_) => {
+            tracing::error!("WebSocket relay: timeout connecting to {}", target);
+            let (mut sink, _) = ws.split();
+            let _ = sink
+                .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+                    code: 1011,
+                    reason: "Connection timed out".into(),
                 })))
                 .await;
             return;
@@ -163,22 +299,15 @@ async fn handle_ws_relay(ws: WebSocket, conn: Connection) {
 
     tracing::info!("WebSocket relay: connected to {}", target);
 
-    let (tcp_read, tcp_write) = tcp.into_split();
-    let (ws_sink, ws_stream) = ws.split();
-
-    let ws_sink = Arc::new(tokio::sync::Mutex::new(ws_sink));
-    let tcp_write = Arc::new(tokio::sync::Mutex::new(tcp_write));
+    let (mut tcp_read, mut tcp_write) = tcp.into_split();
+    let (mut ws_sink, mut ws_stream) = ws.split();
 
     // WS → TCP: forward binary messages from browser to RDP target
-    let tcp_write_clone = tcp_write.clone();
     let ws_to_tcp = async {
-        let mut stream = ws_stream;
-        while let Some(msg) = stream.next().await {
+        while let Some(msg) = ws_stream.next().await {
             match msg {
                 Ok(Message::Binary(data)) => {
-                    use tokio::io::AsyncWriteExt;
-                    let mut writer = tcp_write_clone.lock().await;
-                    if writer.write_all(&data).await.is_err() {
+                    if tcp_write.write_all(&data).await.is_err() {
                         break;
                     }
                 }
@@ -186,29 +315,31 @@ async fn handle_ws_relay(ws: WebSocket, conn: Connection) {
                 _ => {} // ignore text/ping/pong
             }
         }
+        let _ = tcp_write.shutdown().await;
     };
 
     // TCP → WS: forward RDP target responses to browser
-    let ws_sink_clone = ws_sink.clone();
     let tcp_to_ws = async {
-        use tokio::io::AsyncReadExt;
-        let mut reader = tcp_read;
         let mut buf = vec![0u8; 16384];
         loop {
-            match reader.read(&mut buf).await {
+            match tcp_read.read(&mut buf).await {
                 Ok(0) => break,
                 Ok(n) => {
-                    let mut sink = ws_sink_clone.lock().await;
-                    if sink.send(Message::Binary(buf[..n].to_vec().into())).await.is_err() {
+                    if ws_sink
+                        .send(Message::Binary(buf[..n].to_vec().into()))
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
                 Err(_) => break,
             }
         }
+        let _ = ws_sink.close().await;
     };
 
-    // Run both directions concurrently; stop when either ends
+    // Run both directions; stop when either ends
     tokio::select! {
         _ = ws_to_tcp => {},
         _ = tcp_to_ws => {},

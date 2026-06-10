@@ -20,6 +20,7 @@ import {
   ArrowLeftRegular,
 } from "@fluentui/react-icons";
 import type { Connection } from "../types";
+import { createSessionToken } from "../api";
 
 const useStyles = makeStyles({
   container: {
@@ -112,15 +113,41 @@ export function SessionPage() {
       .catch((e) => setError(e.message));
   }, [id]);
 
-  const handleConnect = useCallback(() => {
+  // Placeholder rendering: show connection activity on the canvas
+  const renderActivity = useCallback((bytes: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Visualize data flowing — simple activity indicator
+    const x = Math.random() * canvas.width;
+    const y = Math.random() * canvas.height;
+    const size = Math.min(bytes / 100, 20);
+    ctx.fillStyle = `rgba(0, 120, 212, ${Math.min(bytes / 1000, 0.8)})`;
+    ctx.fillRect(x, y, size, size);
+  }, []);
+
+  const handleConnect = useCallback(async () => {
     if (!connection) return;
     setStatus("connecting");
     setError(null);
     setBytesReceived(0);
     setBytesSent(0);
 
+    // Obtain a session token before opening the WebSocket
+    let token: string;
+    try {
+      const session = await createSessionToken(connection.id);
+      token = session.token;
+    } catch (e) {
+      setStatus("error");
+      setError(e instanceof Error ? e.message : "Failed to create session");
+      return;
+    }
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/api/connections/${connection.id}/ws`;
+    const wsUrl = `${protocol}//${window.location.host}/api/connections/${connection.id}/ws?token=${encodeURIComponent(token)}`;
 
     const ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
@@ -128,21 +155,13 @@ export function SessionPage() {
 
     ws.onopen = () => {
       setStatus("connected");
-      // Send credentials as the first message (JSON text frame)
-      ws.send(
-        JSON.stringify({
-          username,
-          password,
-          host: connection.host,
-          port: connection.port,
-        })
-      );
+      // No credentials are sent — RDP auth will be handled by IronRDP WASM
+      // when integrated. The relay is a pure byte bridge.
     };
 
     ws.onmessage = (event) => {
       if (event.data instanceof ArrayBuffer) {
         setBytesReceived((prev) => prev + event.data.byteLength);
-        // Draw raw RDP data to canvas (placeholder: show data activity)
         renderActivity(event.data.byteLength);
       }
     };
@@ -159,7 +178,7 @@ export function SessionPage() {
       }
       wsRef.current = null;
     };
-  }, [connection, username, password]);
+  }, [connection, renderActivity]);
 
   const handleDisconnect = useCallback(() => {
     if (wsRef.current) {
@@ -167,21 +186,6 @@ export function SessionPage() {
       wsRef.current = null;
     }
     setStatus("disconnected");
-  }, []);
-
-  // Placeholder rendering: show connection activity on the canvas
-  const renderActivity = useCallback((bytes: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    // Visualize data flowing — simple activity indicator
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const size = Math.min(bytes / 100, 20);
-    ctx.fillStyle = `rgba(0, 120, 212, ${Math.min(bytes / 1000, 0.8)})`;
-    ctx.fillRect(x, y, size, size);
   }, []);
 
   // Initialize canvas
@@ -257,7 +261,7 @@ export function SessionPage() {
                 </MessageBar>
               )}
 
-              <Field label="Username" className={styles.formField}>
+              <Field label="Username (for RDP auth)" className={styles.formField}>
                 <Input
                   value={username}
                   onChange={(_, data) => setUsername(data.value)}
@@ -266,7 +270,7 @@ export function SessionPage() {
                 />
               </Field>
 
-              <Field label="Password" className={styles.formField}>
+              <Field label="Password (for RDP auth)" className={styles.formField}>
                 <Input
                   type="password"
                   value={password}
@@ -274,6 +278,10 @@ export function SessionPage() {
                   disabled={status === "connected" || status === "connecting"}
                 />
               </Field>
+
+              <Caption1 style={{ display: "block", marginBottom: "12px", color: tokens.colorNeutralForeground3 }}>
+                Credentials stay in your browser — used locally by the RDP client.
+              </Caption1>
 
               {status === "disconnected" || status === "error" ? (
                 <Button

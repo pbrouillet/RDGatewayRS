@@ -40,3 +40,11 @@ export async function deleteConnection(id: number): Promise<void> {
 export function rdpDownloadUrl(id: number): string {
   return `${API_BASE}/${id}/rdp`;
 }
+
+export async function createSessionToken(
+  id: number
+): Promise<{ token: string; expires_in: number }> {
+  const res = await fetch(`${API_BASE}/${id}/session`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to create session: ${res.statusText}`);
+  return res.json();
+}

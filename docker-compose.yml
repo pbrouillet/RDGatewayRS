@@ -1,0 +1,26 @@
+# Docker Compose for RDG Gateway supporting services
+# Run with: docker compose up -d
+#
+# Services:
+#   guacd - Apache Guacamole protocol daemon (required for browser-based RDP)
+#   aspire - .NET Aspire Dashboard for OpenTelemetry (optional)
+
+services:
+  guacd:
+    image: guacamole/guacd:1.5.5
+    container_name: rdg-guacd
+    ports:
+      - "4822:4822"
+    restart: unless-stopped
+
+  aspire:
+    image: mcr.microsoft.com/dotnet/aspire-dashboard:latest
+    container_name: rdg-aspire
+    ports:
+      - "18888:18888"   # Dashboard UI
+      - "4317:18889"    # OTLP gRPC endpoint
+    environment:
+      - DOTNET_DASHBOARD_UNSECURED_ALLOW_ANONYMOUS=true
+    restart: unless-stopped
+    profiles:
+      - telemetry

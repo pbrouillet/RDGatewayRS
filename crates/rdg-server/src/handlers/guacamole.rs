@@ -73,10 +73,19 @@ async fn guac_proxy(
     let addr = format!("{}:{}", guacd_host, guacd_port);
     info!("Guacamole proxy: connecting to guacd at {}", addr);
 
+    let (mut ws_sink, mut ws_stream) = ws.split();
+
     let stream = match TcpStream::connect(&addr).await {
         Ok(s) => s,
         Err(e) => {
             error!("Guacamole proxy: failed to connect to guacd at {}: {}", addr, e);
+            let err_msg = format!(
+                "5.error,{}.Cannot connect to guacd at {} - is it running?,3.519;",
+                format!("Cannot connect to guacd at {} - is it running?", addr).len(),
+                addr
+            );
+            let _ = ws_sink.send(Message::Text(err_msg.into())).await;
+            let _ = ws_sink.send(Message::Close(None)).await;
             return;
         }
     };
@@ -128,9 +137,6 @@ async fn guac_proxy(
     }
 
     info!("Guacamole proxy: connected to {}:{} via guacd", params.host, rdp_port);
-
-    // Relay between WebSocket and guacd
-    let (mut ws_sink, mut ws_stream) = ws.split();
 
     // Send the ready instruction to the browser client
     if ws_sink.send(Message::Text(ready_line.trim().into())).await.is_err() {

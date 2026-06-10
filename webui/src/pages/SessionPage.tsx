@@ -63,6 +63,11 @@ export function SessionPage() {
     const client = new Guacamole.Client(tunnel);
     clientRef.current = client;
 
+    tunnel.onerror = (error) => {
+      setStatus("error");
+      setErrorMsg(error.message || "Tunnel error - is guacd running?");
+    };
+
     client.onerror = (error) => {
       setStatus("error");
       setErrorMsg(error.message || "Connection error");

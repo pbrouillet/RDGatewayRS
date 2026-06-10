@@ -352,10 +352,9 @@ where
                                         break;
                                     }
                                     Ok(TsgMessage::Unknown { msg_type, payload }) => {
-                                        info!("Relay WS→TCP: unknown TSG type 0x{:02x} ({} bytes payload), echoing back", msg_type, payload.len());
-                                        let mut buf = bytes::BytesMut::new();
-                                        messages::write_echo_response(msg_type, &payload, &mut buf);
-                                        let _ = ctrl_tx.send(buf.freeze()).await;
+                                        // Type 0x10 is a control/setup message — acknowledge silently
+                                        // Other unknown types: log and ignore (don't echo back)
+                                        debug!("Relay WS→TCP: unknown TSG type 0x{:02x} ({} bytes payload), ignoring", msg_type, payload.len());
                                     }
                                     Ok(TsgMessage::ChannelCreate(req)) => {
                                         // mstsc may re-request channel during relay (e.g. reconnection)

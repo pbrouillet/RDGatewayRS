@@ -210,10 +210,35 @@ async fn build_tls_config(config: &ServerConfig, db: &dyn rdg_core::db::DbProvid
     use rdg_core::db::models::CertificateInfo;
     use sha2::{Sha256, Digest};
 
+    let (cert_pem_bytes, key_pem_bytes) = load_or_generate_cert(config, db).await?;
+
+    // Build a rustls ServerConfig with HTTP/1.1 only ALPN
+    // (HTTP/2 does not support WebSocket upgrade which we need for both mstsc and Guacamole)
+    let certs = rustls_pemfile::certs(&mut &cert_pem_bytes[..])
+        .collect::<Result<Vec<_>, _>>()?;
+    let key = rustls_pemfile::private_key(&mut &key_pem_bytes[..])?
+        .ok_or_else(|| anyhow::anyhow!("No private key found in PEM"))?;
+
+    let mut server_config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)?;
+    server_config.alpn_protocols = vec![b"http/1.1".to_vec()];
+
+    let tls = RustlsConfig::from_config(std::sync::Arc::new(server_config));
+    Ok(tls)
+}
+
+async fn load_or_generate_cert(config: &ServerConfig, db: &dyn rdg_core::db::DbProvider) -> Result<(Vec<u8>, Vec<u8>)> {
+    use rdg_core::db::models::CertificateInfo;
+    use sha2::{Sha256, Digest};
+
     if let (Some(cert_path), Some(key_path)) = (&config.tls.cert_path, &config.tls.key_path) {
-        let tls = RustlsConfig::from_pem_file(cert_path, key_path).await?;
-        Ok(tls)
-    } else if config.tls.auto_generate {
+        let cert_pem = std::fs::read(cert_path)?;
+        let key_pem = std::fs::read(key_path)?;
+        return Ok((cert_pem, key_pem));
+    }
+
+    if config.tls.auto_generate {
         // Collect all useful SANs: server_name + all non-loopback local IPs
         let mut san_names = vec![config.server_name.clone()];
         if let Ok(hostname) = std::env::var("COMPUTERNAME") {
@@ -265,8 +290,9 @@ async fn build_tls_config(config: &ServerConfig, db: &dyn rdg_core::db::DbProvid
                     "Reusing persisted self-signed certificate (thumbprint: {})",
                     &existing.thumbprint[..16]
                 );
-                let tls = RustlsConfig::from_pem_file(&cert_file, &key_file).await?;
-                return Ok(tls);
+                let cert_pem = std::fs::read(&cert_file)?;
+                let key_pem = std::fs::read(&key_file)?;
+                return Ok((cert_pem, key_pem));
             }
         }
 
@@ -318,8 +344,7 @@ async fn build_tls_config(config: &ServerConfig, db: &dyn rdg_core::db::DbProvid
             tracing::warn!("Failed to save certificate to database: {}", e);
         }
 
-        let tls = RustlsConfig::from_pem(cert_pem.into_bytes(), key_pem.into_bytes()).await?;
-        Ok(tls)
+        Ok((cert_pem.into_bytes(), key_pem.into_bytes()))
     } else {
         anyhow::bail!("TLS not configured: provide cert/key paths or enable auto_generate");
     }

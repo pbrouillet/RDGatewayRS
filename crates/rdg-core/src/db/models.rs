@@ -6,6 +6,7 @@ pub struct User {
     pub username: String,
     pub nt_hash: Vec<u8>,
     pub enabled: bool,
+    pub password_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

@@ -125,6 +125,7 @@ async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<St
         .with_state(app_state.clone());
 
     if with_webui || config.webui.enabled {
+        app = app.merge(handlers::auth::routes().with_state(app_state.clone()));
         app = app.merge(handlers::webui::routes().with_state(app_state.clone()));
         tracing::info!("Web UI portal enabled at /portal/");
     }
@@ -162,7 +163,9 @@ async fn run_webui(config_path: &str, port: u16) -> Result<()> {
     let db_arc: Arc<dyn rdg_core::db::DbProvider> = Arc::new(db);
     let app_state = Arc::new(AppState::new(config, db_arc));
 
-    let app = handlers::webui::routes().with_state(app_state);
+    let app = handlers::auth::routes()
+        .merge(handlers::webui::routes())
+        .with_state(app_state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;

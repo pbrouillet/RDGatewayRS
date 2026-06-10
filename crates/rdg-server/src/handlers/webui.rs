@@ -1,5 +1,6 @@
 //! Web UI handler: REST API for connections, .rdp file generation, WebSocket relay, and embedded SPA.
 
+use crate::handlers::auth;
 use crate::state::AppState;
 use axum::{
     body::Body,
@@ -29,27 +30,44 @@ struct WebUiAssets;
 
 /// API + static file routes for the web UI portal.
 pub fn routes() -> Router<Arc<AppState>> {
-    Router::new()
-        // REST API
+    // Protected API routes (require session cookie)
+    let api_routes = Router::new()
         .route("/api/connections", get(list_connections))
         .route("/api/connections", post(create_connection))
         .route("/api/connections/{id}", get(get_connection))
         .route("/api/connections/{id}", put(update_connection))
         .route("/api/connections/{id}", delete(delete_connection))
         .route("/api/connections/{id}/rdp", get(download_rdp))
-        .route("/api/connections/{id}/session", post(create_session_token))
-        .route("/api/connections/{id}/ws", get(ws_relay))
-        // Portal SPA (catch-all for client-side routing)
+        .route("/api/connections/{id}/session", post(create_session_token));
+
+    // WS relay uses its own token-based auth (not cookie)
+    let ws_routes = Router::new()
+        .route("/api/connections/{id}/ws", get(ws_relay));
+
+    // Portal SPA (public — needs to load login page)
+    let portal_routes = Router::new()
         .route("/portal/{*path}", get(serve_portal))
         .route("/portal", get(serve_portal_index))
-        .route("/portal/", get(serve_portal_index))
+        .route("/portal/", get(serve_portal_index));
+
+    api_routes.merge(ws_routes).merge(portal_routes)
+}
+
+/// Validate session cookie from request headers. Returns 401 if invalid.
+fn check_session(headers: &axum::http::HeaderMap, state: &AppState) -> Result<i64, StatusCode> {
+    let cookie_header = headers
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok());
+    auth::validate_session_cookie(cookie_header, state).ok_or(StatusCode::UNAUTHORIZED)
 }
 
 // --- REST API handlers ---
 
 async fn list_connections(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<Vec<Connection>>, StatusCode> {
+    check_session(&headers, &state)?;
     state
         .db
         .list_connections()
@@ -69,8 +87,10 @@ struct ConnectionInput {
 
 async fn create_connection(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(input): Json<ConnectionInput>,
 ) -> Result<(StatusCode, Json<Connection>), StatusCode> {
+    check_session(&headers, &state)?;
     let conn = state
         .db
         .create_connection(
@@ -87,8 +107,10 @@ async fn create_connection(
 
 async fn get_connection(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<Connection>, StatusCode> {
+    check_session(&headers, &state)?;
     state
         .db
         .get_connection(id)
@@ -100,9 +122,11 @@ async fn get_connection(
 
 async fn update_connection(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<i64>,
     Json(input): Json<ConnectionInput>,
 ) -> Result<StatusCode, StatusCode> {
+    check_session(&headers, &state)?;
     state
         .db
         .update_connection(
@@ -120,8 +144,10 @@ async fn update_connection(
 
 async fn delete_connection(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, StatusCode> {
+    check_session(&headers, &state)?;
     state
         .db
         .delete_connection(id)
@@ -210,8 +236,10 @@ struct SessionTokenResponse {
 
 async fn create_session_token(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Json<SessionTokenResponse>, StatusCode> {
+    check_session(&headers, &state)?;
     // Verify the connection exists
     state
         .db
@@ -352,8 +380,10 @@ async fn handle_ws_relay(ws: WebSocket, conn: Connection) {
 
 async fn download_rdp(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Response, StatusCode> {
+    check_session(&headers, &state)?;
     let conn = state
         .db
         .get_connection(id)

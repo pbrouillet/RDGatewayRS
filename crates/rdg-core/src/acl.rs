@@ -229,7 +229,7 @@ fn ipv6_mask(prefix_len: u8) -> u128 {
 mod tests {
     use super::*;
     use crate::db::{
-        models::{CertificateInfo, Group, Session, User},
+        models::{CertificateInfo, Connection, Group, Session, User},
         provider::DbError,
     };
 
@@ -418,6 +418,10 @@ mod tests {
             unimplemented!()
         }
 
+        async fn create_user_with_password(&self, _username: &str, _nt_hash: &[u8], _password_hash: &str) -> Result<User, DbError> {
+            unimplemented!()
+        }
+
         async fn list_users(&self) -> Result<Vec<User>, DbError> {
             unimplemented!()
         }
@@ -472,6 +476,26 @@ mod tests {
 
         async fn save_certificate(&self, _cert: &CertificateInfo) -> Result<(), DbError> {
             Ok(())
+        }
+
+        async fn list_connections(&self) -> Result<Vec<Connection>, DbError> {
+            unimplemented!()
+        }
+
+        async fn get_connection(&self, _id: i64) -> Result<Option<Connection>, DbError> {
+            unimplemented!()
+        }
+
+        async fn create_connection(&self, _name: &str, _host: &str, _port: i32, _description: Option<&str>, _icon: &str) -> Result<Connection, DbError> {
+            unimplemented!()
+        }
+
+        async fn update_connection(&self, _id: i64, _name: &str, _host: &str, _port: i32, _description: Option<&str>, _icon: &str) -> Result<(), DbError> {
+            unimplemented!()
+        }
+
+        async fn delete_connection(&self, _id: i64) -> Result<(), DbError> {
+            unimplemented!()
         }
     }
 

@@ -1,15 +1,23 @@
-import { makeStyles, Title1, Spinner, MessageBar } from "@fluentui/react-components";
+import { makeStyles, Title1, Spinner, MessageBar, Button, Text } from "@fluentui/react-components";
 import { useState, useEffect, useCallback } from "react";
 import type { Connection, ConnectionInput } from "../types";
 import { listConnections, createConnection, updateConnection, deleteConnection } from "../api";
 import { ConnectionCard } from "./ConnectionCard";
 import { ConnectionForm } from "./ConnectionForm";
+import { useAuth } from "../contexts/AuthContext";
 
 const useStyles = makeStyles({
   container: {
     padding: "24px",
     maxWidth: "1200px",
     margin: "0 auto",
+  },
+  toolbar: {
+    display: "flex",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    gap: "12px",
+    marginBottom: "8px",
   },
   header: {
     display: "flex",
@@ -31,6 +39,7 @@ const useStyles = makeStyles({
 
 export function ConnectionGrid() {
   const styles = useStyles();
+  const { user, logout } = useAuth();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +105,10 @@ export function ConnectionGrid() {
 
   return (
     <div className={styles.container}>
+      <div className={styles.toolbar}>
+        <Text>{user?.username}</Text>
+        <Button appearance="subtle" onClick={logout}>Sign Out</Button>
+      </div>
       <div className={styles.header}>
         <Title1>Connections</Title1>
         <ConnectionForm

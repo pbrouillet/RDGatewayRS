@@ -30,6 +30,7 @@ impl DbProvider for SqliteProvider {
                 username TEXT UNIQUE NOT NULL,
                 nt_hash BLOB NOT NULL,
                 enabled BOOLEAN NOT NULL DEFAULT 1,
+                password_hash TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE IF NOT EXISTS groups (
@@ -86,12 +87,20 @@ impl DbProvider for SqliteProvider {
         .execute(&self.pool)
         .await
         .map_err(|e| DbError::Migration(e.to_string()))?;
+
+        // Migration: add password_hash column if missing (for existing DBs)
+        let _ = sqlx::raw_sql(
+            "ALTER TABLE users ADD COLUMN password_hash TEXT;"
+        )
+        .execute(&self.pool)
+        .await;
+
         Ok(())
     }
 
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>, DbError> {
         let user = sqlx::query_as::<_, User>(
-            "SELECT id, username, nt_hash, enabled FROM users WHERE username = ? COLLATE NOCASE",
+            "SELECT id, username, nt_hash, enabled, password_hash FROM users WHERE username = ? COLLATE NOCASE",
         )
         .bind(username)
         .fetch_optional(&self.pool)
@@ -111,11 +120,29 @@ impl DbProvider for SqliteProvider {
             username: username.to_string(),
             nt_hash: nt_hash.to_vec(),
             enabled: true,
+            password_hash: None,
+        })
+    }
+
+    async fn create_user_with_password(&self, username: &str, nt_hash: &[u8], password_hash: &str) -> Result<User, DbError> {
+        let result = sqlx::query("INSERT INTO users (username, nt_hash, password_hash) VALUES (?, ?, ?)")
+            .bind(username)
+            .bind(nt_hash)
+            .bind(password_hash)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(User {
+            id: result.last_insert_rowid(),
+            username: username.to_string(),
+            nt_hash: nt_hash.to_vec(),
+            enabled: true,
+            password_hash: Some(password_hash.to_string()),
         })
     }
 
     async fn list_users(&self) -> Result<Vec<User>, DbError> {
-        let users = sqlx::query_as::<_, User>("SELECT id, username, nt_hash, enabled FROM users")
+        let users = sqlx::query_as::<_, User>("SELECT id, username, nt_hash, enabled, password_hash FROM users")
             .fetch_all(&self.pool)
             .await?;
         Ok(users)

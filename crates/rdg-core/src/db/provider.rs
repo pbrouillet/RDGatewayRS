@@ -20,6 +20,7 @@ pub trait DbProvider: Send + Sync {
     // --- Users ---
     async fn get_user_by_username(&self, username: &str) -> Result<Option<User>, DbError>;
     async fn create_user(&self, username: &str, nt_hash: &[u8]) -> Result<User, DbError>;
+    async fn create_user_with_password(&self, username: &str, nt_hash: &[u8], password_hash: &str) -> Result<User, DbError>;
     async fn list_users(&self) -> Result<Vec<User>, DbError>;
     async fn set_user_enabled(&self, user_id: i64, enabled: bool) -> Result<(), DbError>;
 

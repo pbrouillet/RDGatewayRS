@@ -124,7 +124,7 @@ async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<St
         .merge(handlers::routes())
         .with_state(app_state.clone());
 
-    if with_webui {
+    if with_webui || config.webui.enabled {
         app = app.merge(handlers::webui::routes().with_state(app_state.clone()));
         tracing::info!("Web UI portal enabled at /portal/");
     }

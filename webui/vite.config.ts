@@ -6,7 +6,11 @@ export default defineConfig({
   base: '/portal/',
   server: {
     proxy: {
-      '/api': 'https://localhost:3443',
+      '/api': {
+        target: 'https://localhost:3443',
+        secure: false,
+        ws: true,
+      },
     },
   },
 })

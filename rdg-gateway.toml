@@ -19,5 +19,5 @@ service_name = "rdg-gateway"
 enabled = true
 
 [webui]
-enabled = false
+enabled = true
 # gateway_url = "https://gateway.example.com:3443"

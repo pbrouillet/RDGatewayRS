@@ -17,3 +17,7 @@ open_mode = true  # Accept any NTLM without validation (testing only!)
 otlp_endpoint = "http://localhost:4317"
 service_name = "rdg-gateway"
 enabled = true
+
+[webui]
+enabled = false
+# gateway_url = "https://gateway.example.com:3443"

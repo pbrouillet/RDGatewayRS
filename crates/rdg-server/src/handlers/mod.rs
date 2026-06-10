@@ -1,5 +1,6 @@
 pub mod health;
 pub mod rpch;
+pub mod webui;
 pub mod websocket;
 
 use crate::metrics;

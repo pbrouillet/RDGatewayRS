@@ -37,6 +37,19 @@ enum Command {
         /// Path to TLS private key PEM file (overrides config)
         #[arg(long, value_name = "PATH")]
         tls_key: Option<String>,
+        /// Also serve the web UI portal on the same port
+        #[arg(long)]
+        with_webui: bool,
+    },
+    /// Run the web UI portal standalone (HTTP, no TLS)
+    #[command(name = "webui")]
+    WebUi {
+        /// Path to configuration file
+        #[arg(short, long, default_value = "rdg-gateway.toml")]
+        config: String,
+        /// Port to serve the web UI on
+        #[arg(long, default_value = "8080")]
+        port: u16,
     },
     /// Launch the TUI for database management
     Manage {
@@ -55,9 +68,13 @@ async fn main() -> Result<()> {
         san_names: Vec::new(),
         tls_cert: None,
         tls_key: None,
+        with_webui: false,
     }) {
-        Command::Serve { config, san_names, tls_cert, tls_key } => {
-            run_serve(&config, san_names, tls_cert, tls_key).await
+        Command::Serve { config, san_names, tls_cert, tls_key, with_webui } => {
+            run_serve(&config, san_names, tls_cert, tls_key, with_webui).await
+        }
+        Command::WebUi { config, port } => {
+            run_webui(&config, port).await
         }
         Command::Manage { config } => {
             let cfg = load_config(&config)?;
@@ -66,7 +83,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<String>, tls_key: Option<String>) -> Result<()> {
+async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<String>, tls_key: Option<String>, with_webui: bool) -> Result<()> {
     install_crypto_provider();
 
     let mut config = load_config(config_path)?;
@@ -103,9 +120,14 @@ async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<St
     let db_arc: Arc<dyn rdg_core::db::DbProvider> = Arc::new(db);
     let app_state = Arc::new(AppState::new(config.clone(), db_arc.clone()));
 
-    let app = Router::new()
+    let mut app = Router::new()
         .merge(handlers::routes())
         .with_state(app_state.clone());
+
+    if with_webui {
+        app = app.merge(handlers::webui::routes().with_state(app_state.clone()));
+        tracing::info!("Web UI portal enabled at /portal/");
+    }
 
     let addr = SocketAddr::new(config.listen_addr.parse()?, config.listen_port);
     let tls_config = build_tls_config(&config, &*db_arc).await?;
@@ -122,6 +144,34 @@ async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<St
             tracing::info!("Shutting down...");
         }
     }
+
+    telemetry::shutdown();
+    Ok(())
+}
+
+async fn run_webui(config_path: &str, port: u16) -> Result<()> {
+    let config = load_config(config_path)?;
+    telemetry::init(&config.telemetry)?;
+
+    tracing::info!("Starting Web UI portal on http://0.0.0.0:{}", port);
+
+    let db = SqliteProvider::new(&config.database.url).await?;
+    db.migrate().await?;
+    tracing::info!("Database initialized");
+
+    let db_arc: Arc<dyn rdg_core::db::DbProvider> = Arc::new(db);
+    let app_state = Arc::new(AppState::new(config, db_arc));
+
+    let app = handlers::webui::routes().with_state(app_state);
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+
+    tracing::info!("Web UI listening on http://{}", addr);
+
+    axum::serve(listener, app.into_make_service())
+        .with_graceful_shutdown(async { tokio::signal::ctrl_c().await.ok(); })
+        .await?;
 
     telemetry::shutdown();
     Ok(())

@@ -11,6 +11,8 @@ pub struct ServerConfig {
     pub server_name: String,
     #[serde(default)]
     pub telemetry: TelemetryConfig,
+    #[serde(default)]
+    pub webui: WebUiConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -87,6 +89,25 @@ impl Default for ServerConfig {
             auth: AuthConfig::default(),
             server_name: hostname(),
             telemetry: TelemetryConfig::default(),
+            webui: WebUiConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WebUiConfig {
+    /// Whether the web UI is enabled when running `serve --with-webui`
+    #[serde(default)]
+    pub enabled: bool,
+    /// Gateway URL used in .rdp files (when web UI runs standalone)
+    pub gateway_url: Option<String>,
+}
+
+impl Default for WebUiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            gateway_url: None,
         }
     }
 }

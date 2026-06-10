@@ -55,3 +55,15 @@ pub struct CertificateInfo {
     pub auto_generated: bool,
     pub created_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Connection {
+    pub id: i64,
+    pub name: String,
+    pub host: String,
+    pub port: i32,
+    pub description: Option<String>,
+    pub icon: String,
+    pub created_at: String,
+    pub updated_at: String,
+}

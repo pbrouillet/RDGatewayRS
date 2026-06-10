@@ -5,3 +5,5 @@ certs/
 *.log
 *.err
 test_*.py
+webui/node_modules/
+webui/dist/

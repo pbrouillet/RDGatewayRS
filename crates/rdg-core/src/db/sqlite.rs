@@ -1,4 +1,4 @@
-use super::models::{AclRule, CertificateInfo, Group, Session, User};
+use super::models::{AclRule, CertificateInfo, Connection, Group, Session, User};
 use super::provider::{DbError, DbProvider};
 use async_trait::async_trait;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
@@ -71,6 +71,16 @@ impl DbProvider for SqliteProvider {
                 key_path TEXT NOT NULL,
                 auto_generated BOOLEAN NOT NULL DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS connections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 3389,
+                description TEXT,
+                icon TEXT NOT NULL DEFAULT 'Desktop',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );",
         )
         .execute(&self.pool)
@@ -246,6 +256,72 @@ impl DbProvider for SqliteProvider {
         .bind(cert.auto_generated)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    async fn list_connections(&self) -> Result<Vec<Connection>, DbError> {
+        let conns = sqlx::query_as::<_, Connection>(
+            "SELECT id, name, host, port, description, icon, created_at, updated_at FROM connections ORDER BY name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(conns)
+    }
+
+    async fn get_connection(&self, id: i64) -> Result<Option<Connection>, DbError> {
+        let conn = sqlx::query_as::<_, Connection>(
+            "SELECT id, name, host, port, description, icon, created_at, updated_at FROM connections WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(conn)
+    }
+
+    async fn create_connection(&self, name: &str, host: &str, port: i32, description: Option<&str>, icon: &str) -> Result<Connection, DbError> {
+        let result = sqlx::query(
+            "INSERT INTO connections (name, host, port, description, icon) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(name)
+        .bind(host)
+        .bind(port)
+        .bind(description)
+        .bind(icon)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(Connection {
+            id: result.last_insert_rowid(),
+            name: name.to_string(),
+            host: host.to_string(),
+            port,
+            description: description.map(|s| s.to_string()),
+            icon: icon.to_string(),
+            created_at: String::new(),
+            updated_at: String::new(),
+        })
+    }
+
+    async fn update_connection(&self, id: i64, name: &str, host: &str, port: i32, description: Option<&str>, icon: &str) -> Result<(), DbError> {
+        sqlx::query(
+            "UPDATE connections SET name = ?, host = ?, port = ?, description = ?, icon = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        )
+        .bind(name)
+        .bind(host)
+        .bind(port)
+        .bind(description)
+        .bind(icon)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_connection(&self, id: i64) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM connections WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }

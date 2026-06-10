@@ -5,11 +5,11 @@
 RDG Gateway RS implements the Microsoft RD Gateway (TSGateway) protocol, enabling Remote Desktop clients to connect to backend RDP hosts through HTTPS. The gateway terminates TLS, authenticates clients, then establishes a bidirectional TCP relay to the target RDP server.
 
 ```
-┌─────────┐     HTTPS/WSS      ┌─────────────┐      TCP/3389      ┌──────────┐
+┌──────────┐    HTTPS/WSS      ┌──────────────┐      TCP/3389       ┌──────────┐
 │  Client  │ ───────────────── │  RDG Gateway │ ─────────────────── │ RDP Host │
-│(mstsc/   │  WebSocket or     │   (this)     │   Raw RDP/NLA/TLS  │          │
-│ FreeRDP) │  RPC-over-HTTP    └─────────────┘                     └──────────┘
-└─────────┘
+│(mstsc/   │  WebSocket or     │   (this)     │   Raw RDP/NLA/TLS   │          │
+│ FreeRDP) │  RPC-over-HTTP    └──────────────┘                     └──────────┘
+└──────────┘
 ```
 
 ## Transport Protocols
@@ -26,9 +26,9 @@ Client                              Gateway
   │                                    │
   │── RDG_OUT_DATA (no auth) ─────────→│  ← 401 + WWW-Authenticate: Negotiate
   │                                    │
-  │── RDG_OUT_DATA + NTLM Type1 ─────→│  ← 401 + Negotiate <Type2 challenge>
+  │── RDG_OUT_DATA + NTLM Type1 ──────→│  ← 401 + Negotiate <Type2 challenge>
   │                                    │
-  │── RDG_OUT_DATA + NTLM Type3 ─────→│  ← 101 Switching Protocols (WebSocket)
+  │── RDG_OUT_DATA + NTLM Type3 ──────→│  ← 101 Switching Protocols (WebSocket)
   │                                    │
   │══ WebSocket Binary Frames ════════ │  ← TSG message exchange
   │   (TSG handshake then relay)       │
@@ -51,7 +51,7 @@ Client                              Gateway
   │── RPC_IN_DATA  (CONN/B1 RTS) ─────→│  ← CONN/C2 RTS on OUT channel
   │                                    │
   │── DCE/RPC Bind (IN) ──────────────→│  ← Bind Ack (OUT)
-  │── RPC Request (TSG opnums) ────────→│  ← RPC Response (OUT)
+  │── RPC Request (TSG opnums) ───────→│  ← RPC Response (OUT)
   │                                    │
   │   ... TSG handshake via RPC ...    │
   │                                    │

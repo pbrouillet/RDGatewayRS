@@ -1,4 +1,4 @@
-use crate::db::models::{AclRule, CertificateInfo, Group, Session, User};
+use crate::db::models::{AclRule, CertificateInfo, Connection, Group, Session, User};
 use async_trait::async_trait;
 use thiserror::Error;
 
@@ -42,6 +42,13 @@ pub trait DbProvider: Send + Sync {
     // --- Certificates ---
     async fn get_certificate(&self) -> Result<Option<CertificateInfo>, DbError>;
     async fn save_certificate(&self, cert: &CertificateInfo) -> Result<(), DbError>;
+
+    // --- Connections ---
+    async fn list_connections(&self) -> Result<Vec<Connection>, DbError>;
+    async fn get_connection(&self, id: i64) -> Result<Option<Connection>, DbError>;
+    async fn create_connection(&self, name: &str, host: &str, port: i32, description: Option<&str>, icon: &str) -> Result<Connection, DbError>;
+    async fn update_connection(&self, id: i64, name: &str, host: &str, port: i32, description: Option<&str>, icon: &str) -> Result<(), DbError>;
+    async fn delete_connection(&self, id: i64) -> Result<(), DbError>;
 }
 
 // Re-export for convenience

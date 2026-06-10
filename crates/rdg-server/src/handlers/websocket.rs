@@ -357,6 +357,21 @@ where
                                         messages::write_echo_response(msg_type, &payload, &mut buf);
                                         let _ = ctrl_tx.send(buf.freeze()).await;
                                     }
+                                    Ok(TsgMessage::ChannelCreate(req)) => {
+                                        // mstsc may re-request channel during relay (e.g. reconnection)
+                                        info!("Relay WS→TCP: ChannelCreate for {}:{}, responding", req.server_name, req.port);
+                                        let response = messages::ChannelResponse {
+                                            error_code: 0,
+                                            fields_present: messages::HTTP_CHANNEL_RESPONSE_FIELD_CHANNELID,
+                                            reserved: 0,
+                                            channel_id: Some(1),
+                                            udp_port: None,
+                                            auth_cookie: None,
+                                        };
+                                        let mut buf = bytes::BytesMut::new();
+                                        response.write(&mut buf);
+                                        let _ = ctrl_tx.send(buf.freeze()).await;
+                                    }
                                     Ok(other) => {
                                         warn!("Relay WS→TCP: unhandled TSG message during relay: {:?}", other);
                                     }

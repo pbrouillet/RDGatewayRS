@@ -10,6 +10,8 @@ use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
 use rdg_core::config::TelemetryConfig;
+use std::time::Duration;
+use tokio::net::TcpStream;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -19,10 +21,24 @@ static METER_PROVIDER: std::sync::OnceLock<SdkMeterProvider> = std::sync::OnceLo
 static TRACER_PROVIDER: std::sync::OnceLock<SdkTracerProvider> = std::sync::OnceLock::new();
 static LOGGER_PROVIDER: std::sync::OnceLock<SdkLoggerProvider> = std::sync::OnceLock::new();
 
+/// Probe the OTLP endpoint with a TCP connect and a short timeout.
+/// Returns true if the endpoint is reachable.
+async fn probe_endpoint(endpoint: &str) -> bool {
+    let addr = endpoint
+        .strip_prefix("http://")
+        .or_else(|| endpoint.strip_prefix("https://"))
+        .unwrap_or(endpoint);
+
+    match tokio::time::timeout(Duration::from_secs(2), TcpStream::connect(addr)).await {
+        Ok(Ok(_)) => true,
+        _ => false,
+    }
+}
+
 /// Initialize the tracing subscriber with optional OpenTelemetry export.
-/// If `config.otlp_endpoint` is set and `config.enabled` is true, spans, metrics,
-/// and logs are exported via OTLP gRPC. Console output is always enabled.
-pub fn init(config: &TelemetryConfig) -> Result<()> {
+/// If `config.otlp_endpoint` is set and `config.enabled` is true, the endpoint is probed
+/// first. If unreachable, a single warning is emitted and we fall back to console-only.
+pub async fn init(config: &TelemetryConfig) -> Result<()> {
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,rdg_server=debug,rdg_core=debug"));
 
@@ -34,6 +50,16 @@ pub fn init(config: &TelemetryConfig) -> Result<()> {
 
     if config.enabled {
         if let Some(endpoint) = &config.otlp_endpoint {
+            // Probe connectivity before setting up exporters
+            if !probe_endpoint(endpoint).await {
+                registry.init();
+                tracing::warn!(
+                    "OTLP endpoint {} is unreachable — falling back to console-only logging",
+                    endpoint
+                );
+                return Ok(());
+            }
+
             let resource = Resource::builder()
                 .with_attributes([
                     KeyValue::new("service.name", config.service_name.clone()),

@@ -89,7 +89,7 @@ async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<St
     let mut config = load_config(config_path)?;
 
     // Initialize telemetry (must come after config load so we know the endpoint)
-    telemetry::init(&config.telemetry)?;
+    telemetry::init(&config.telemetry).await?;
 
     // Apply CLI overrides
     if let Some(cert) = tls_cert {
@@ -151,7 +151,7 @@ async fn run_serve(config_path: &str, cli_sans: Vec<String>, tls_cert: Option<St
 
 async fn run_webui(config_path: &str, port: u16) -> Result<()> {
     let config = load_config(config_path)?;
-    telemetry::init(&config.telemetry)?;
+    telemetry::init(&config.telemetry).await?;
 
     tracing::info!("Starting Web UI portal on http://0.0.0.0:{}", port);
 

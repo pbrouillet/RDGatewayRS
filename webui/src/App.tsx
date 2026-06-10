@@ -5,7 +5,6 @@ import {
 } from "@fluentui/react-components";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ConnectionGrid } from "./components/ConnectionGrid";
-import { SessionPage } from "./pages/SessionPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 
@@ -32,14 +31,6 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ConnectionGrid />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/session/:id"
-        element={
-          <ProtectedRoute>
-            <SessionPage />
           </ProtectedRoute>
         }
       />

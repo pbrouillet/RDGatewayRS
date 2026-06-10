@@ -15,7 +15,6 @@ import {
   DeleteRegular,
   ServerRegular,
   LaptopRegular,
-  PlugConnectedRegular,
 } from "@fluentui/react-icons";
 import type { Connection } from "../types";
 import { rdpDownloadUrl } from "../api";
@@ -57,11 +56,6 @@ export function ConnectionCard({ connection, onEdit, onDelete }: Props) {
     window.location.href = rdpDownloadUrl(connection.id);
   };
 
-  const handleConnectWeb = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    window.open(`/portal/session/${connection.id}`, "_blank");
-  };
-
   return (
     <Card className={styles.card} onClick={handleDownload}>
       <div className={styles.iconContainer}>
@@ -82,23 +76,15 @@ export function ConnectionCard({ connection, onEdit, onDelete }: Props) {
       )}
       <CardFooter>
         <Button
-          icon={<PlugConnectedRegular />}
-          size="small"
-          appearance="primary"
-          onClick={handleConnectWeb}
-        >
-          Web
-        </Button>
-        <Button
           icon={<ArrowDownloadRegular />}
           size="small"
-          appearance="subtle"
+          appearance="primary"
           onClick={(e) => {
             e.stopPropagation();
             handleDownload();
           }}
         >
-          RDP
+          Connect
         </Button>
         <Button
           icon={<EditRegular />}

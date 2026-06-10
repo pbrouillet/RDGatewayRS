@@ -6,6 +6,9 @@ A lightweight, cross-platform Remote Desktop Gateway implemented in Rust. Compat
 
 - **Dual transport support**: WebSocket (FreeRDP) and RPC-over-HTTP v2 (mstsc)
 - **NTLM & Kerberos authentication** via SPNEGO Negotiate
+- **Forms-based authentication** for the web UI (argon2 password hashing)
+- **Web UI portal** for managing connections and downloading `.rdp` files
+- **Browser-based RDP** via Apache Guacamole integration (requires guacd)
 - **TLS with auto-generated certificates** (self-signed, persisted across restarts)
 - **TCP relay** to backend RDP hosts with NLA/TLS passthrough
 - **OpenTelemetry observability**: traces, logs, and metrics via OTLP to Aspire Dashboard
@@ -60,6 +63,43 @@ cargo run
 ```
 
 Dashboard UI: http://localhost:18888
+
+### Web UI Portal
+
+The web UI provides a browser-based management interface:
+
+```bash
+# Run gateway with web UI enabled
+cargo run -- serve --with-webui
+
+# Or enable in config:
+# [webui]
+# enabled = true
+```
+
+Access at `https://<gateway>:3443/portal/` — sign up, manage connections, download `.rdp` files.
+
+### Browser-Based RDP (Guacamole)
+
+For in-browser RDP sessions, the gateway proxies the Guacamole protocol to a `guacd` daemon:
+
+```powershell
+# Start guacd (requires Docker)
+docker compose up -d guacd
+
+# Or use the helper script
+.\scripts\start-guacd.ps1
+```
+
+Add to `rdg-gateway.toml`:
+```toml
+[guacamole]
+enabled = true
+guacd_host = "localhost"
+guacd_port = 4822
+```
+
+> **Note:** guacd is Linux-only. On Windows, use Docker Desktop or WSL2 to run it.
 
 ## Architecture
 

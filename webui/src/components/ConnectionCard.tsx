@@ -15,7 +15,9 @@ import {
   DeleteRegular,
   ServerRegular,
   LaptopRegular,
+  OpenRegular,
 } from "@fluentui/react-icons";
+import { useNavigate } from "react-router-dom";
 import type { Connection } from "../types";
 import { rdpDownloadUrl } from "../api";
 
@@ -51,9 +53,15 @@ interface Props {
 
 export function ConnectionCard({ connection, onEdit, onDelete }: Props) {
   const styles = useStyles();
+  const navigate = useNavigate();
 
   const handleDownload = () => {
     window.location.href = rdpDownloadUrl(connection.id);
+  };
+
+  const handleWebConnect = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate(`/session?host=${encodeURIComponent(connection.host)}&port=${connection.port}&name=${encodeURIComponent(connection.name)}`);
   };
 
   return (
@@ -76,15 +84,23 @@ export function ConnectionCard({ connection, onEdit, onDelete }: Props) {
       )}
       <CardFooter>
         <Button
-          icon={<ArrowDownloadRegular />}
+          icon={<OpenRegular />}
           size="small"
           appearance="primary"
+          onClick={handleWebConnect}
+        >
+          Web
+        </Button>
+        <Button
+          icon={<ArrowDownloadRegular />}
+          size="small"
+          appearance="secondary"
           onClick={(e) => {
             e.stopPropagation();
             handleDownload();
           }}
         >
-          Connect
+          RDP
         </Button>
         <Button
           icon={<EditRegular />}

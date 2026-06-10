@@ -6,6 +6,7 @@ import {
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ConnectionGrid } from "./components/ConnectionGrid";
 import { LoginPage } from "./pages/LoginPage";
+import { SessionPage } from "./pages/SessionPage";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -31,6 +32,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ConnectionGrid />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/session"
+        element={
+          <ProtectedRoute>
+            <SessionPage />
           </ProtectedRoute>
         }
       />

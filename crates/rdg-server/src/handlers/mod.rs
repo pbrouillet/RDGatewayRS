@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod guacamole;
 pub mod health;
 pub mod rpch;
 pub mod webui;
